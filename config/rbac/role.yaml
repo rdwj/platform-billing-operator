@@ -1,11 +1,52 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  labels:
-    app.kubernetes.io/name: platform-billing-operator
-    app.kubernetes.io/managed-by: kustomize
   name: manager-role
 rules:
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list", "watch"]
+- apiGroups:
+  - billing.opendatahub.io
+  resources:
+  - plans
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - billing.opendatahub.io
+  resources:
+  - plans/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - billing.opendatahub.io
+  resources:
+  - plans/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gateways
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kuadrant.io
+  resources:
+  - authpolicies
+  - ratelimitpolicies
+  - tokenratelimitpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

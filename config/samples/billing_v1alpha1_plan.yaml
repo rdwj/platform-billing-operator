@@ -12,6 +12,8 @@ spec:
   modelScopes: ["llama-3-*", "granite-*"]
   geoScopes: ["*"]
   queueClass: priority
-  gatewayRef:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
     name: data-science-gateway
-    namespace: openshift-ingress
+  priceBookRef: pb-standard

@@ -1,0 +1,15 @@
+# This kustomization.yaml is not intended to be run by itself,
+# since it depends on service name and target namespace substitution from
+# having `config/default` as kustomization root.
+# It should be run by config/default
+resources:
+- bases/billing.opendatahub.io_plans.yaml
+- bases/billing.opendatahub.io_pricebooks.yaml
+
+# [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
+# patches here are for enabling the conversion webhook for each CRD
+#+kubebuilder:scaffold:crdkustomizewebhookpatch
+
+# [CERTMANAGER] To enable cert-manager, uncomment all the sections with [CERTMANAGER] prefix.
+# Uncomment the following line to add a cert-manager certificate injection annotation
+#+kubebuilder:scaffold:crdkustomizecainjectionpatch
