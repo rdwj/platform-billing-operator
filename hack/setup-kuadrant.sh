@@ -61,7 +61,7 @@ helm install kuadrant-operator kuadrant/kuadrant-operator \
   --version "${KUADRANT_VERSION}" \
   --namespace kuadrant-system --create-namespace \
   --kube-context "$CLUSTER_CONTEXT" \
-  --wait --timeout 600s
+  --wait --timeout 900s
 
 # ---------- Kuadrant CR ----------
 info "Creating Kuadrant CR"

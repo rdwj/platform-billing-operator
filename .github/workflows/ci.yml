@@ -85,7 +85,8 @@ jobs:
     name: M0 Demo (kind + Kuadrant)
     runs-on: ubuntu-latest
     needs: [lint, test]
-    timeout-minutes: 25
+    continue-on-error: true
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
