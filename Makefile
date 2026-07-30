@@ -244,6 +244,10 @@ dev-cluster: ## Create a kind dev cluster with full Kuadrant stack
 	@KUBECTL=$(KUBECTL) hack/setup-kuadrant.sh $(CLUSTER_CONTEXT)
 	@echo "Dev cluster ready. Context: $(CLUSTER_CONTEXT)"
 
+.PHONY: setup-postgres
+setup-postgres: ## Deploy Postgres 16 to the dev kind cluster
+	@KUBECTL=$(KUBECTL) hack/setup-postgres.sh $(CLUSTER_CONTEXT)
+
 .PHONY: dev-cluster-delete
 dev-cluster-delete: ## Delete the kind dev cluster
 	@$(KIND) delete cluster --name $(DEV_CLUSTER_NAME)
