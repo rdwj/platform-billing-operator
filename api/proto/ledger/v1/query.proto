@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package ledger.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/rdwj/platform-billing-operator/gen/go/ledger/v1;ledgerv1";
+
+service QueryService {
+  rpc QueryEvents(QueryEventsRequest) returns (QueryEventsResponse);
+}
+
+message QueryEventsRequest {
+  string tenant_id = 1;
+  google.protobuf.Timestamp start_time = 2;
+  google.protobuf.Timestamp end_time = 3;
+  string sku = 4;
+  int32 limit = 5;
+  string page_token = 6;
+}
+
+message QueryEventsResponse {
+  repeated UsageEvent events = 1;
+  string next_page_token = 2;
+}
+
+message UsageEvent {
+  string record_id = 1;
+  string schema_ver = 2;
+  string tenant_id = 3;
+  string key_id = 4;
+  string sku = 5;
+  string geo = 6;
+  string profile = 7;
+  string collector = 8;
+  int64 prompt_tokens = 9;
+  int64 completion_tokens = 10;
+  int64 reasoning_tokens = 11;
+  int64 cached_tokens = 12;
+  string quantities_json = 13;
+  string status = 14;
+  bool partial = 15;
+  bool stream = 16;
+  double latency_ms = 17;
+  string attributes_json = 18;
+  string content_hash = 19;
+  google.protobuf.Timestamp event_ts = 20;
+  google.protobuf.Timestamp ingested_at = 21;
+}

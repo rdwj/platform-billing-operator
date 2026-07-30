@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package ledger.v1;
+
+option go_package = "github.com/rdwj/platform-billing-operator/gen/go/ledger/v1;ledgerv1";
+
+service IngestService {
+  rpc IngestEvent(IngestEventRequest) returns (IngestEventResponse);
+}
+
+message IngestEventRequest {
+  // Raw usage.v1 JSON event. Kept as a JSON string for language neutrality:
+  // the Rust capture filter sends the same JSON it already constructs.
+  string event_json = 1;
+}
+
+message IngestEventResponse {
+  IngestResult result = 1;
+  string message = 2;
+}
+
+enum IngestResult {
+  INGEST_RESULT_UNSPECIFIED = 0;
+  INGEST_RESULT_INSERTED = 1;
+  INGEST_RESULT_DUPLICATE = 2;
+  INGEST_RESULT_CONFLICT_DLQ = 3;
+  INGEST_RESULT_SCHEMA_UNKNOWN_DLQ = 4;
+  INGEST_RESULT_VALIDATION_FAILED = 5;
+}
