@@ -1,0 +1,304 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: |-
+      [
+        {
+          "apiVersion": "billing.opendatahub.io/v1alpha1",
+          "kind": "Plan",
+          "metadata": {
+            "name": "priority"
+          },
+          "spec": {
+            "geoScopes": [
+              "*"
+            ],
+            "limits": {
+              "maxConcurrency": 64,
+              "requestsPerMinute": 600,
+              "tokensPerDay": 400000000,
+              "tokensPerMinute": 2000000
+            },
+            "modelScopes": [
+              "llama-3-*",
+              "granite-*"
+            ],
+            "priceBookRef": "pb-standard",
+            "queueClass": "priority",
+            "targetRef": {
+              "group": "gateway.networking.k8s.io",
+              "kind": "Gateway",
+              "name": "billing-demo-gateway"
+            }
+          }
+        },
+        {
+          "apiVersion": "billing.opendatahub.io/v1alpha1",
+          "kind": "PriceBook",
+          "metadata": {
+            "name": "pb-standard"
+          },
+          "spec": {
+            "currency": "USD",
+            "effectiveFrom": "2026-09-01T00:00:00Z",
+            "noticeDays": 30,
+            "skus": [
+              {
+                "geo": "",
+                "rates": {
+                  "cached_tokens": "0.625",
+                  "completion_tokens": "10.00",
+                  "prompt_tokens": "2.50",
+                  "reasoning_tokens": "10.00"
+                },
+                "sku": "llama-3-70b",
+                "unit": "per-1M-tokens"
+              },
+              {
+                "rates": {
+                  "gpu_seconds": "4.50"
+                },
+                "sku": "h200-mig-3g.40gb",
+                "unit": "per-gpu-hour"
+              }
+            ],
+            "volumeTiers": [
+              {
+                "discountPct": "8",
+                "thresholdTokens": 1000000000
+              }
+            ]
+          }
+        }
+      ]
+    capabilities: Basic Install
+    createdAt: "2026-07-30T20:49:31Z"
+    operators.operatorframework.io/builder: operator-sdk-v1.42.3
+    operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+  name: platform-billing-operator.v0.0.1
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: |-
+        Plan is the Schema for the plans API.
+        It defines a billing plan with rate limits and model scopes that compiles
+        down to Kuadrant TokenRateLimitPolicy, RateLimitPolicy, and AuthPolicy CRs.
+      displayName: Plan
+      kind: Plan
+      name: plans.billing.opendatahub.io
+      version: v1alpha1
+    - description: |-
+        PriceBook is the Schema for the pricebooks API.
+        It defines the catalog of SKU rates, volume discounts, and committed-use tiers
+        that govern how tenant usage is rated and invoiced.
+      displayName: Price Book
+      kind: PriceBook
+      name: pricebooks.billing.opendatahub.io
+      version: v1alpha1
+  description: |
+    Compiles billing Plans into Kuadrant enforcement policies
+    (TokenRateLimitPolicy, RateLimitPolicy, AuthPolicy) on a Gateway API
+    gateway. Part of the billing and metering layer for OpenShift AI.
+  displayName: Platform Billing Operator
+  icon:
+  - base64data: ""
+    mediatype: ""
+  install:
+    spec:
+      clusterPermissions:
+      - rules:
+        - apiGroups:
+          - billing.opendatahub.io
+          resources:
+          - plans
+          verbs:
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - billing.opendatahub.io
+          resources:
+          - plans/finalizers
+          verbs:
+          - update
+        - apiGroups:
+          - billing.opendatahub.io
+          resources:
+          - plans/status
+          verbs:
+          - get
+          - patch
+          - update
+        - apiGroups:
+          - gateway.networking.k8s.io
+          resources:
+          - gateways
+          verbs:
+          - get
+          - list
+          - watch
+        - apiGroups:
+          - kuadrant.io
+          resources:
+          - authpolicies
+          - ratelimitpolicies
+          - tokenratelimitpolicies
+          verbs:
+          - create
+          - delete
+          - get
+          - list
+          - patch
+          - update
+          - watch
+        - apiGroups:
+          - authentication.k8s.io
+          resources:
+          - tokenreviews
+          verbs:
+          - create
+        - apiGroups:
+          - authorization.k8s.io
+          resources:
+          - subjectaccessreviews
+          verbs:
+          - create
+        serviceAccountName: platform-billing-operator-controller-manager
+      deployments:
+      - label:
+          app.kubernetes.io/managed-by: kustomize
+          app.kubernetes.io/name: platform-billing-operator
+          control-plane: controller-manager
+        name: platform-billing-operator-controller-manager
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app.kubernetes.io/name: platform-billing-operator
+              control-plane: controller-manager
+          strategy: {}
+          template:
+            metadata:
+              annotations:
+                kubectl.kubernetes.io/default-container: manager
+              labels:
+                app.kubernetes.io/name: platform-billing-operator
+                control-plane: controller-manager
+            spec:
+              containers:
+              - args:
+                - --metrics-bind-address=:8443
+                - --leader-elect
+                - --health-probe-bind-address=:8081
+                command:
+                - /manager
+                image: platform-billing-operator:dev
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: 8081
+                  initialDelaySeconds: 15
+                  periodSeconds: 20
+                name: manager
+                ports:
+                - containerPort: 9443
+                  name: webhook-server
+                  protocol: TCP
+                readinessProbe:
+                  httpGet:
+                    path: /readyz
+                    port: 8081
+                  initialDelaySeconds: 5
+                  periodSeconds: 10
+                resources:
+                  limits:
+                    cpu: 500m
+                    memory: 128Mi
+                  requests:
+                    cpu: 10m
+                    memory: 64Mi
+                securityContext:
+                  allowPrivilegeEscalation: false
+                  capabilities:
+                    drop:
+                    - ALL
+              securityContext:
+                runAsNonRoot: true
+                seccompProfile:
+                  type: RuntimeDefault
+              serviceAccountName: platform-billing-operator-controller-manager
+              terminationGracePeriodSeconds: 10
+      permissions:
+      - rules:
+        - apiGroups:
+          - ""
+          resources:
+          - configmaps
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - coordination.k8s.io
+          resources:
+          - leases
+          verbs:
+          - get
+          - list
+          - watch
+          - create
+          - update
+          - patch
+          - delete
+        - apiGroups:
+          - ""
+          resources:
+          - events
+          verbs:
+          - create
+          - patch
+        serviceAccountName: platform-billing-operator-controller-manager
+    strategy: deployment
+  installModes:
+  - supported: true
+    type: OwnNamespace
+  - supported: true
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  maturity: alpha
+  provider:
+    name: Open Data Hub
+  version: 0.0.1
+  webhookdefinitions:
+  - admissionReviewVersions:
+    - v1
+    containerPort: 443
+    deploymentName: platform-billing-operator-controller-manager
+    failurePolicy: Fail
+    generateName: vpricebook-v1alpha1.kb.io
+    rules:
+    - apiGroups:
+      - billing.opendatahub.io
+      apiVersions:
+      - v1alpha1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pricebooks
+    sideEffects: None
+    targetPort: 9443
+    type: ValidatingAdmissionWebhook
+    webhookPath: /validate-billing-opendatahub-io-v1alpha1-pricebook

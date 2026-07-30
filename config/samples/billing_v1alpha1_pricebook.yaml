@@ -1,10 +1,13 @@
 # Sample PriceBook — matches contracts/rating-vectors.v1.json (pb-standard) so the
 # M0 demo and the rater golden tests tell one coherent story.
+#
+# The effectiveFrom date must be in the future when creating (webhook validates
+# effectiveFrom >= now + noticeDays). Once effectiveFrom passes, SKUs become
+# immutable — edits are rejected by the webhook.
 apiVersion: billing.opendatahub.io/v1alpha1
 kind: PriceBook
 metadata:
   name: pb-standard
-  namespace: platform-billing
 spec:
   currency: USD
   effectiveFrom: "2026-09-01T00:00:00Z"

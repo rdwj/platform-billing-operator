@@ -20,7 +20,8 @@ jobs:
           go-version-file: go.mod
       - uses: golangci/golangci-lint-action@v8
         with:
-          version: v2.1.0
+          version: v2.12.2
+          install-mode: goinstall
 
   test:
     name: Unit Tests
@@ -80,20 +81,68 @@ jobs:
         run: |
           make docker-build CONTAINER_TOOL=docker IMG=platform-billing-operator:ci-${{ github.sha }}
 
-  test-e2e:
-    name: E2E Tests (kind)
+  demo:
+    name: M0 Demo (kind + Kuadrant)
     runs-on: ubuntu-latest
     needs: [lint, test]
-    if: false  # Disabled until Phase 2 provides CRDs to test against
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Install kind
+      - name: Install tools
         run: |
+          # kind
           curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
           chmod +x ./kind
           sudo mv ./kind /usr/local/bin/kind
-      - name: Run e2e tests
-        run: make test-e2e
+          # operator-sdk
+          OSDK_VERSION=$(grep 'OPERATOR_SDK_VERSION' Makefile | head -1 | awk -F'?= ' '{print $2}')
+          curl -sSLo ./operator-sdk "https://github.com/operator-framework/operator-sdk/releases/download/${OSDK_VERSION}/operator-sdk_linux_amd64"
+          chmod +x ./operator-sdk
+          sudo mv ./operator-sdk /usr/local/bin/operator-sdk
+          # helm
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name platform-billing-dev --wait 60s
+        env:
+          KIND_EXPERIMENTAL_PROVIDER: docker
+      - name: Install Kuadrant stack
+        run: |
+          KUBECTL=kubectl hack/setup-kuadrant.sh kind-platform-billing-dev
+      - name: Install OLM
+        run: |
+          operator-sdk olm install --timeout 5m
+      - name: Build and deploy operator via OLM
+        run: |
+          IMG=platform-billing-operator:ci-${{ github.sha }}
+          BUNDLE_IMG=platform-billing-operator-bundle:ci-${{ github.sha }}
+
+          # Build operator image and load into kind.
+          make docker-build CONTAINER_TOOL=docker IMG=$IMG
+          kind load docker-image $IMG --name platform-billing-dev
+
+          # Generate and build bundle.
+          make bundle IMG=$IMG CONTAINER_TOOL=docker
+          make bundle-build BUNDLE_IMG=$BUNDLE_IMG CONTAINER_TOOL=docker
+          kind load docker-image $BUNDLE_IMG --name platform-billing-dev
+
+          # Deploy via OLM.
+          operator-sdk run bundle $BUNDLE_IMG --timeout 5m
+      - name: Run M0 demo
+        run: |
+          KUBECTL=kubectl CLUSTER_CONTEXT=kind-platform-billing-dev make demo-m0
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Operator logs ==="
+          kubectl logs -l control-plane=controller-manager -n platform-billing-operator-system --tail=100 2>/dev/null || true
+          echo "=== Events ==="
+          kubectl get events -n billing-demo --sort-by='.lastTimestamp' 2>/dev/null || true
+          echo "=== Kuadrant CRs ==="
+          kubectl get tokenratelimitpolicies,ratelimitpolicies,authpolicies -A 2>/dev/null || true
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name platform-billing-dev

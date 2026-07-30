@@ -1,0 +1,3 @@
+resources:
+- billing_v1alpha1_pricebook.yaml
+- billing_v1alpha1_plan.yaml

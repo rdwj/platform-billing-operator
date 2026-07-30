@@ -223,16 +223,16 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 ##@ Project
 
 DEV_CLUSTER_NAME ?= platform-billing-dev
-BILLING_DEV_NS ?= billing-dev
+BILLING_DEV_NS ?= billing-demo
 CLUSTER_CONTEXT ?= kind-$(DEV_CLUSTER_NAME)
 export KIND_EXPERIMENTAL_PROVIDER ?= podman
 
 .PHONY: dev-cluster
-dev-cluster: ## Create a kind dev cluster with Gateway API CRDs
+dev-cluster: ## Create a kind dev cluster with full Kuadrant stack
 	@echo "Creating kind cluster '$(DEV_CLUSTER_NAME)'..."
 	@$(KIND) create cluster --name $(DEV_CLUSTER_NAME) --wait 60s || true
-	@echo "Installing Gateway API CRDs..."
-	@$(KUBECTL) --context $(CLUSTER_CONTEXT) apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
+	@echo "Installing Kuadrant stack..."
+	@KUBECTL=$(KUBECTL) hack/setup-kuadrant.sh $(CLUSTER_CONTEXT)
 	@echo "Dev cluster ready. Context: $(CLUSTER_CONTEXT)"
 
 .PHONY: dev-cluster-delete
@@ -250,7 +250,7 @@ undeploy-dev: kustomize ## Remove operator from the dev cluster
 
 .PHONY: demo-m0
 demo-m0: ## Run M0 end-to-end demo (Plan → Kuadrant CRs → drift detection)
-	@echo "demo-m0: not yet implemented"
+	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-m0.sh
 
 .PHONY: demo-m1
 demo-m1: ## Run M1 demo (capture + ledger ingest)
@@ -321,7 +321,7 @@ CONTROLLER_TOOLS_VERSION ?= v0.18.0
 ENVTEST_VERSION ?= $(shell go list -m -f "{{ .Version }}" sigs.k8s.io/controller-runtime | awk -F'[v.]' '{printf "release-%d.%d", $$2, $$3}')
 #ENVTEST_K8S_VERSION is the version of Kubernetes to use for setting up ENVTEST binaries (i.e. 1.31)
 ENVTEST_K8S_VERSION ?= $(shell go list -m -f "{{ .Version }}" k8s.io/api | awk -F'[v.]' '{printf "1.%d", $$3}')
-GOLANGCI_LINT_VERSION ?= v2.1.0
+GOLANGCI_LINT_VERSION ?= v2.12.2
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.

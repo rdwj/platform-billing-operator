@@ -1,0 +1,74 @@
+apiVersion: operators.coreos.com/v1alpha1
+kind: ClusterServiceVersion
+metadata:
+  annotations:
+    alm-examples: '[]'
+    capabilities: Basic Install
+  name: platform-billing-operator.v0.0.0
+  namespace: placeholder
+spec:
+  apiservicedefinitions: {}
+  customresourcedefinitions:
+    owned:
+    - description: |-
+        Plan is the Schema for the plans API.
+        It defines a billing plan with rate limits and model scopes that compiles
+        down to Kuadrant TokenRateLimitPolicy, RateLimitPolicy, and AuthPolicy CRs.
+      displayName: Plan
+      kind: Plan
+      name: plans.billing.opendatahub.io
+      version: v1alpha1
+    - description: |-
+        PriceBook is the Schema for the pricebooks API.
+        It defines the catalog of SKU rates, volume discounts, and committed-use tiers
+        that govern how tenant usage is rated and invoiced.
+      displayName: Price Book
+      kind: PriceBook
+      name: pricebooks.billing.opendatahub.io
+      version: v1alpha1
+  description: |
+    Compiles billing Plans into Kuadrant enforcement policies
+    (TokenRateLimitPolicy, RateLimitPolicy, AuthPolicy) on a Gateway API
+    gateway. Part of the billing and metering layer for OpenShift AI.
+  displayName: Platform Billing Operator
+  icon:
+  - base64data: ""
+    mediatype: ""
+  install:
+    spec:
+      deployments: null
+    strategy: ""
+  installModes:
+  - supported: true
+    type: OwnNamespace
+  - supported: true
+    type: SingleNamespace
+  - supported: false
+    type: MultiNamespace
+  - supported: true
+    type: AllNamespaces
+  maturity: alpha
+  provider:
+    name: Open Data Hub
+  version: 0.0.0
+  webhookdefinitions:
+  - admissionReviewVersions:
+    - v1
+    containerPort: 9443
+    deploymentName: controller-manager
+    failurePolicy: Fail
+    generateName: vpricebook-v1alpha1.kb.io
+    rules:
+    - apiGroups:
+      - billing.opendatahub.io
+      apiVersions:
+      - v1alpha1
+      operations:
+      - CREATE
+      - UPDATE
+      resources:
+      - pricebooks
+    sideEffects: None
+    targetPort: 9443
+    type: ValidatingAdmissionWebhook
+    webhookPath: /validate-billing-opendatahub-io-v1alpha1-pricebook

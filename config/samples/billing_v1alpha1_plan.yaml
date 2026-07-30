@@ -1,8 +1,16 @@
+# Sample Plan demonstrating all compilation paths.
+#
+# Token limits → TokenRateLimitPolicy (tokensPerMinute, tokensPerDay)
+# Request limits → RateLimitPolicy (requestsPerMinute)
+# Model scopes → AuthPolicy CEL predicates
+# maxConcurrency → stored but not enforceable (sets UnsupportedField condition)
+#
+# For the demo cluster, the gateway name is "billing-demo-gateway" in namespace
+# "billing-demo". Replace the targetRef for production deployments.
 apiVersion: billing.opendatahub.io/v1alpha1
 kind: Plan
 metadata:
   name: priority
-  namespace: platform-billing
 spec:
   limits:
     requestsPerMinute: 600
@@ -15,5 +23,5 @@ spec:
   targetRef:
     group: gateway.networking.k8s.io
     kind: Gateway
-    name: data-science-gateway
+    name: billing-demo-gateway  # demo cluster; production: data-science-gateway
   priceBookRef: pb-standard
