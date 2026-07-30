@@ -225,11 +225,12 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 DEV_CLUSTER_NAME ?= platform-billing-dev
 BILLING_DEV_NS ?= billing-dev
 CLUSTER_CONTEXT ?= kind-$(DEV_CLUSTER_NAME)
+export KIND_EXPERIMENTAL_PROVIDER ?= podman
 
 .PHONY: dev-cluster
 dev-cluster: ## Create a kind dev cluster with Gateway API CRDs
 	@echo "Creating kind cluster '$(DEV_CLUSTER_NAME)'..."
-	@$(KIND) create cluster --name $(DEV_CLUSTER_NAME) --wait 60s 2>/dev/null || echo "Cluster already exists"
+	@$(KIND) create cluster --name $(DEV_CLUSTER_NAME) --wait 60s || true
 	@echo "Installing Gateway API CRDs..."
 	@$(KUBECTL) --context $(CLUSTER_CONTEXT) apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml
 	@echo "Dev cluster ready. Context: $(CLUSTER_CONTEXT)"
