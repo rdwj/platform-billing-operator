@@ -1,0 +1,44 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Go workspace file
+go.work
+
+# Kubernetes Generated files - skip generated files, except for vendored files
+!vendor/**/zz_generated.*
+
+# editor and IDE paraphernalia
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# Dev environment
+.venv/
+.pytest_cache/
+.ruff_cache/
+.cache_ggshield/
+htmlcov/
+.benchmarks/
+
+# Session scratch files (NOT planning files)
+RESUME.md
+TODO_NEXT.md
+notes.md
+
+# Local binaries
+bin/
+
+# Container build artifacts
+Containerfile.cross

@@ -1,0 +1,14 @@
+{
+  "schema_version": "usage.v1",
+  "record_id": "req-7f3a9c2e-12",
+  "occurred_at": "2026-07-29T14:04:01.002Z",
+  "tenant_id": "ten-helix",
+  "key_id": "key-4821",
+  "source": { "profile": "maas", "collector": "capture-wasm" },
+  "sku": "llama-3-70b",
+  "quantities": { "prompt_tokens": 380, "completion_tokens": 174 },
+  "status": "client_disconnect",
+  "partial": true,
+  "stream": true,
+  "latency_ms": 890.0
+}

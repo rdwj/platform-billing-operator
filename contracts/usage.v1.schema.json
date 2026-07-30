@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://billing.opendatahub.io/schemas/usage.v1.schema.json",
+  "title": "usage.v1",
+  "description": "The source-agnostic usage-event ingest contract for platform-billing-operator. Every collector (MaaS capture filter, future upstream structured logs, GPUaaS Kueue collector) emits this envelope; ledger-svc upserts idempotently on record_id. Product-specific detail lives ONLY in quantities keys and sku — the billing core never interprets them beyond the PriceBook. This file is the interface named in operator-plan/README.md principle 6 and architecture.md §3; breaking changes require a new schema_version (usage.v2), never mutation.",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "record_id",
+    "occurred_at",
+    "tenant_id",
+    "source",
+    "sku",
+    "quantities",
+    "status"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "const": "usage.v1",
+      "description": "Envelope version. Consumers MUST reject unknown versions rather than guess."
+    },
+    "record_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "description": "Idempotency key. MaaS: the gateway request_id. GPUaaS: allocation-interval id (workload UID + interval seq). Ledger upserts on this; conflicting content for the same record_id goes to the DLQ, never overwrites."
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Event completion time, RFC 3339, UTC. For streaming: time of stream termination. For GPUaaS interval events: interval end."
+    },
+    "tenant_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Billing tenant identity as resolved by the platform (Authorino filter metadata for MaaS; queue/namespace mapping for GPUaaS). NEVER sourced from client-supplied headers."
+    },
+    "key_id": {
+      "type": "string",
+      "description": "API key identifier (not the secret) for per-key attribution and BudgetPolicy grouping. MaaS only; absent for GPUaaS."
+    },
+    "source": {
+      "type": "object",
+      "required": ["profile", "collector"],
+      "additionalProperties": false,
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": ["maas", "gpuaas"],
+          "description": "Metering profile that produced the event (ADR-0005)."
+        },
+        "collector": {
+          "type": "string",
+          "description": "Concrete collector implementation, e.g. 'capture-wasm', 'capture-extproc', 'kuadrant-structured-logs', 'kueue-collector'. Lets the reconciler and DLQ triage distinguish sources after a MeteringPipeline.spec.source switch.",
+          "minLength": 1
+        },
+        "collector_version": {
+          "type": "string",
+          "description": "Collector build version, for forensic replay."
+        }
+      }
+    },
+    "sku": {
+      "type": "string",
+      "minLength": 1,
+      "description": "What was consumed, in PriceBook terms. MaaS: model identifier (e.g. 'llama-3-70b'). GPUaaS: flavor (e.g. 'h200', 'h200-mig-3g.40gb')."
+    },
+    "geo": {
+      "type": "string",
+      "description": "Geography tag for per-geo rates and data-residency partitioning (Q8). Optional; PriceBook default-geo rates apply when absent."
+    },
+    "quantities": {
+      "type": "object",
+      "description": "Profile-specific measured quantities. Keys are rated against PriceBook component rates; unknown keys are preserved in the ledger (forward-compat: new token types land here first — gap-analysis §4) but produce a 'unrated_quantity' warning until priced.",
+      "minProperties": 1,
+      "additionalProperties": { "type": "number", "minimum": 0 },
+      "properties": {
+        "prompt_tokens": { "type": "number", "minimum": 0 },
+        "completion_tokens": { "type": "number", "minimum": 0 },
+        "reasoning_tokens": { "type": "number", "minimum": 0, "description": "From completion_tokens_details.reasoning_tokens when the engine emits it; otherwise absent (billed per PriceBook fallback rule)." },
+        "cached_tokens": { "type": "number", "minimum": 0, "description": "From prompt_tokens_details.cached_tokens when emitted." },
+        "total_tokens": { "type": "number", "minimum": 0 },
+        "gpu_seconds": { "type": "number", "minimum": 0 },
+        "slice_fraction": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "client_disconnect", "upstream_error"],
+      "description": "Terminal request status. client_disconnect: partial usage recorded; billable per the disclosed policy (Q6). upstream_error: provider fault (e.g. 5xx mid-stream, no usage chunk); rated $0 by default (Q15) and routed via DLQ when quantities are absent or partial."
+    },
+    "partial": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when quantities are best-effort (disconnect/error before the usage-bearing chunk). Partial events participate in reconciliation but are flagged in rating."
+    },
+    "stream": {
+      "type": "boolean",
+      "description": "MaaS: whether the request was a streaming response. Affects capture path and reconciliation slicing."
+    },
+    "latency_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "MaaS: request wall time. Display/SLO only — never rated."
+    },
+    "interval": {
+      "type": "object",
+      "description": "GPUaaS: the allocation interval this event covers (hourly interval events keep wallets draining continuously).",
+      "required": ["start", "end", "seq"],
+      "additionalProperties": false,
+      "properties": {
+        "start": { "type": "string", "format": "date-time" },
+        "end": { "type": "string", "format": "date-time" },
+        "seq": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "attributes": {
+      "type": "object",
+      "description": "Free-form pass-through attribution metadata (project, cost_center, workload labels). Bounded: values are strings, and collectors MUST NOT put secrets or request/response content here.",
+      "additionalProperties": { "type": "string" },
+      "maxProperties": 32
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "source": { "properties": { "profile": { "const": "gpuaas" } } } } },
+      "then": { "required": ["interval"] }
+    }
+  ]
+}

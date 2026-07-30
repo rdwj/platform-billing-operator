@@ -1,0 +1,9 @@
+{
+  "schema_version": "usage.v1",
+  "record_id": "req-bad-1",
+  "occurred_at": "2026-07-29T14:03:22Z",
+  "tenant_id": "ten-helix",
+  "source": { "profile": "maas", "collector": "capture-wasm" },
+  "sku": "llama-3-70b",
+  "quantities": { "prompt_tokens": 1 }
+}

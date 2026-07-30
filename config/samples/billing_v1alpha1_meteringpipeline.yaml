@@ -1,0 +1,19 @@
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: MeteringPipeline
+metadata:
+  name: main
+  namespace: platform-billing
+spec:
+  source:
+    type: ExtProc                   # capture filter per ADR-0006 (until upstream emission lands)
+    extProc:
+      gatewayRef: {name: data-science-gateway, namespace: openshift-ingress}
+      failureMode: Allow            # serve unmetered + book the gap; NEVER fail open on limits
+  ledger:
+    dsnSecretRef: {name: ledger-pg}
+    dedupKey: record_id             # usage.v1 idempotency key
+    retention: {raw: 2160h, aggregates: 26280h}
+  reconcile:
+    interval: 24h
+    tolerancePct: "0.5"
+  dlq: {maxAge: 168h}

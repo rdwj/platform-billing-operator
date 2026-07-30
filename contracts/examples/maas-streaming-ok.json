@@ -1,0 +1,21 @@
+{
+  "schema_version": "usage.v1",
+  "record_id": "req-7f3a9c2e-11",
+  "occurred_at": "2026-07-29T14:03:22.184Z",
+  "tenant_id": "ten-helix",
+  "key_id": "key-4821",
+  "source": { "profile": "maas", "collector": "capture-wasm", "collector_version": "0.1.0" },
+  "sku": "llama-3-70b",
+  "geo": "us-east-1",
+  "quantities": {
+    "prompt_tokens": 412,
+    "completion_tokens": 1288,
+    "reasoning_tokens": 256,
+    "cached_tokens": 128,
+    "total_tokens": 1700
+  },
+  "status": "ok",
+  "stream": true,
+  "latency_ms": 2140.5,
+  "attributes": { "project": "chat-app", "cost_center": "cc-1002" }
+}

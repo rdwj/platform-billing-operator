@@ -1,0 +1,20 @@
+# Demo tenant of the fictitious provider "Corvid AI Cloud" (demo persona only —
+# Corvid never appears in API groups, labels, or field managers).
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: TenantAccount
+metadata:
+  name: ten-helix
+  namespace: platform-billing
+spec:
+  displayName: Helix Biotech
+  planRef: {name: priority}
+  billingMode: Prepaid              # v1 also supports ShowbackOnly (first-class, M2)
+  pspCustomerSecretRef: {name: helix-stripe}
+  reloadPolicy:
+    enabled: true
+    thresholdAmount: "5000"
+    reloadAmount: "25000"
+    monthlyCapAmount: "60000"
+  gracePolicy:
+    window: 4h
+    action: Freeze

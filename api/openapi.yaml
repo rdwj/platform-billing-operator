@@ -1,0 +1,182 @@
+openapi: "3.1.0"
+info:
+  title: platform-billing-operator API (billing-api)
+  version: "0.1.0-m2-skeleton"
+  description: |
+    Contract-first skeleton for the /v1 billing API, scoped to the M2 deliverables
+    (project-plan/milestones.md): usage, balance, pricing, and manual adjustments.
+    This file is the contract — server code is generated/validated against it, and
+    from M2 onward any breaking change to /v1 fails CI (additive only).
+    Conventions: all money values are DECIMAL STRINGS (pattern below); all
+    timestamps RFC 3339 UTC; tenant scoping is applied server-side from verified
+    identity claims — the tenant path/query parameter is validated against the
+    caller's scope, never trusted alone. Scopes: billing:read, billing:tenant:self,
+    billing:admin (interfaces.md §2).
+servers:
+  - url: /v1
+tags:
+  - {name: usage,       description: Rated + raw usage queries (rollup-backed)}
+  - {name: balance,     description: Wallet balance and state}
+  - {name: pricing,     description: Active PriceBook resolution}
+  - {name: adjustments, description: Manual credits/debits (admin, M2)}
+
+paths:
+  /usage:
+    get:
+      tags: [usage]
+      operationId: listUsage
+      summary: Bucketed usage/charge totals for a tenant
+      parameters:
+        - {name: tenant, in: query, required: true, schema: {type: string}}
+        - {name: from,   in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: to,     in: query, required: true, schema: {type: string, format: date-time}}
+        - {name: bucket, in: query, schema: {type: string, enum: [hour, day, month], default: day}}
+        - {name: sku,    in: query, schema: {type: string}, description: Filter by model/SKU}
+        - {name: profile, in: query, schema: {type: string, enum: [maas, gpuaas]}}
+      responses:
+        "200":
+          description: Bucketed usage series
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UsageSeries"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /balance:
+    get:
+      tags: [balance]
+      operationId: getBalance
+      summary: Current wallet balance and account state for a tenant
+      parameters:
+        - {name: tenant, in: query, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Balance snapshot (mirrors ledger, not etcd)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Balance"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /pricing:
+    get:
+      tags: [pricing]
+      operationId: getPricing
+      summary: Resolve the PriceBook revision applicable to a tenant now
+      parameters:
+        - {name: tenant, in: query, required: true, schema: {type: string}}
+        - {name: at,     in: query, schema: {type: string, format: date-time}, description: Resolve as-of a timestamp (default now)}
+      responses:
+        "200":
+          description: Resolved pricebook (revision-pinned)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ResolvedPriceBook"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+
+  /adjustments:
+    post:
+      tags: [adjustments]
+      operationId: createAdjustment
+      summary: Manual credit/debit (billing:admin). The ONLY money mutation besides charges.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/AdjustmentRequest"}
+      responses:
+        "201":
+          description: Adjustment recorded (idempotent on idempotency_key)
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Adjustment"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {description: idempotency_key replay with different content}
+
+components:
+  responses:
+    Forbidden:
+      description: Caller's verified scope does not cover the requested tenant.
+  schemas:
+    Money:
+      type: string
+      pattern: '^-?\d{1,12}\.\d{6}$'
+      description: Decimal string, 6 fractional digits (NUMERIC(18,6)). Never a JSON number.
+      examples: ["0.013670", "-25.000000"]
+
+    UsageSeries:
+      type: object
+      required: [tenant, bucket, points]
+      properties:
+        tenant: {type: string}
+        bucket: {type: string, enum: [hour, day, month]}
+        points:
+          type: array
+          items:
+            type: object
+            required: [start, quantities, charged]
+            properties:
+              start: {type: string, format: date-time}
+              sku: {type: string}
+              quantities:
+                type: object
+                additionalProperties: {type: number}
+                description: Same keys as usage.v1 quantities, summed over the bucket.
+              charged: {$ref: "#/components/schemas/Money"}
+              events: {type: integer, description: Event count in bucket}
+
+    Balance:
+      type: object
+      required: [tenant, currency, balance, state, as_of]
+      properties:
+        tenant: {type: string}
+        currency: {type: string, examples: [USD]}
+        balance: {$ref: "#/components/schemas/Money"}
+        state: {type: string, enum: [Active, Grace, Frozen, Dunning, ShowbackOnly]}
+        as_of: {type: string, format: date-time}
+        reload:
+          type: object
+          description: Auto-reload configuration snapshot (absent in ShowbackOnly).
+          properties:
+            threshold: {$ref: "#/components/schemas/Money"}
+            amount: {$ref: "#/components/schemas/Money"}
+            monthly_cap: {$ref: "#/components/schemas/Money"}
+
+    ResolvedPriceBook:
+      type: object
+      required: [name, revision, currency, skus]
+      properties:
+        name: {type: string}
+        revision: {type: integer}
+        pinned: {type: boolean, description: True if tenant-pinned rather than active-at-timestamp}
+        currency: {type: string}
+        skus:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              unit: {type: string}
+              components:
+                type: object
+                additionalProperties:
+                  type: object
+                  properties:
+                    rate_per_million: {$ref: "#/components/schemas/Money"}
+                    rate_per_unit: {$ref: "#/components/schemas/Money"}
+
+    AdjustmentRequest:
+      type: object
+      required: [tenant, amount, kind, reason, idempotency_key]
+      properties:
+        tenant: {type: string}
+        amount: {$ref: "#/components/schemas/Money", description: Signed — credits positive, debits negative}
+        kind: {type: string, enum: [manual_credit, manual_debit, balance_carry_in, writeoff, unmetered_gap]}
+        reason: {type: string, minLength: 1, description: Audit-log line; required, human-written}
+        idempotency_key: {type: string, minLength: 8}
+
+    Adjustment:
+      allOf:
+        - {$ref: "#/components/schemas/AdjustmentRequest"}
+        - type: object
+          required: [id, created_at]
+          properties:
+            id: {type: string}
+            created_at: {type: string, format: date-time}

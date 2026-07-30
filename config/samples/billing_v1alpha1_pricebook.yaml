@@ -1,0 +1,27 @@
+# Sample PriceBook — matches contracts/rating-vectors.v1.json (pb-standard) so the
+# M0 demo and the rater golden tests tell one coherent story.
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: PriceBook
+metadata:
+  name: pb-standard
+  namespace: platform-billing
+spec:
+  currency: USD
+  effectiveFrom: "2026-09-01T00:00:00Z"
+  noticeDays: 30
+  skus:
+    - sku: llama-3-70b
+      unit: per-1M-tokens
+      geo: ""                       # default for all geos without an explicit entry
+      rates:                        # decimal STRINGS; keys match usage.v1 quantities
+        prompt_tokens: "2.50"
+        completion_tokens: "10.00"
+        reasoning_tokens: "10.00"   # same as completion → informational split (rater semantics)
+        cached_tokens: "0.625"
+    - sku: h200-mig-3g.40gb         # GPUaaS profile reuses the same CRD (ADR-0005)
+      unit: per-gpu-hour
+      rates:
+        gpu_seconds: "4.50"         # rater derives per-second: 4.50 / 3600 = 0.001250
+  volumeTiers:
+    - thresholdTokens: 1000000000
+      discountPct: "8"

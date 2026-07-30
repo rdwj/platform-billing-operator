@@ -1,0 +1,81 @@
+{
+  "description": "Golden test vectors for the rater: rate(event, pricebook_revision, tenant) -> charge. The rater is a deterministic pure function (operator-plan principle: replaying identical inputs MUST produce byte-identical charges). These vectors are the seed of that CI property test — extend, never mutate; superseded vectors get a new id. All money values are decimal STRINGS (float money is a review-blocking defect). Rates are per 1,000,000 units unless stated. Rounding: charge components computed at 6 decimal places (NUMERIC(18,6)), half-up, summed after rounding.",
+  "pricebook": {
+    "name": "pb-standard",
+    "revision": 3,
+    "currency": "USD",
+    "skus": {
+      "llama-3-70b": {
+        "unit": "tokens",
+        "components": {
+          "prompt_tokens": { "rate_per_million": "2.500000" },
+          "completion_tokens": { "rate_per_million": "10.000000" },
+          "reasoning_tokens": { "rate_per_million": "10.000000" },
+          "cached_tokens": { "rate_per_million": "0.625000" }
+        },
+        "notes": "cached_tokens are billed INSTEAD of prompt_tokens for the cached portion: billable prompt = prompt_tokens - cached_tokens. reasoning_tokens are a detail of completion_tokens and are NOT double-billed here; they are listed to allow a differential rate later (this pricebook rates them identically, so the split is informational)."
+      },
+      "h200-mig-3g.40gb": {
+        "unit": "gpu_seconds",
+        "components": {
+          "gpu_seconds": { "rate_per_unit": "0.001250" }
+        },
+        "notes": "per-gpu-second rate = $4.50/hr / 3600. slice_fraction is informational (already reflected in the SKU)."
+      }
+    },
+    "provider_fault_policy": "zero_charge",
+    "client_disconnect_policy": "bill_partial"
+  },
+  "vectors": [
+    {
+      "id": "v1-maas-streaming-ok",
+      "event_file": "examples/maas-streaming-ok.json",
+      "expected_charge": {
+        "currency": "USD",
+        "components": {
+          "prompt_tokens": { "billable_quantity": 284, "amount": "0.000710" },
+          "cached_tokens": { "billable_quantity": 128, "amount": "0.000080" },
+          "completion_tokens": { "billable_quantity": 1288, "amount": "0.012880" },
+          "reasoning_tokens": { "billable_quantity": 0, "amount": "0.000000" }
+        },
+        "total": "0.013670",
+        "notes": "prompt billable = 412-128=284 @ 2.50/M = 0.000710; cached 128 @ 0.625/M = 0.000080; completion 1288 @ 10.00/M = 0.012880 (reasoning included within completion at same rate, differential component zero)."
+      }
+    },
+    {
+      "id": "v1-maas-client-disconnect-billed-partial",
+      "event_file": "examples/maas-client-disconnect.json",
+      "expected_charge": {
+        "currency": "USD",
+        "components": {
+          "prompt_tokens": { "billable_quantity": 380, "amount": "0.000950" },
+          "completion_tokens": { "billable_quantity": 174, "amount": "0.001740" }
+        },
+        "total": "0.002690",
+        "notes": "client_disconnect_policy=bill_partial: tokens-at-disconnect are billed (disclosed policy, Q6)."
+      }
+    },
+    {
+      "id": "v1-maas-upstream-error-zero",
+      "event_file": "examples/maas-upstream-error.json",
+      "expected_charge": {
+        "currency": "USD",
+        "components": {},
+        "total": "0.000000",
+        "notes": "provider_fault_policy=zero_charge (Q15): upstream_error events rate to $0; the event stays in the ledger for reconciliation and dispute traceability."
+      }
+    },
+    {
+      "id": "v1-gpuaas-interval",
+      "event_file": "examples/gpuaas-interval.json",
+      "expected_charge": {
+        "currency": "USD",
+        "components": {
+          "gpu_seconds": { "billable_quantity": 3600, "amount": "4.500000" }
+        },
+        "total": "4.500000",
+        "notes": "3600 gpu_seconds @ 0.001250 = 4.500000. Same rater, same ledger, different profile — the ADR-0005 property under test."
+      }
+    }
+  ]
+}

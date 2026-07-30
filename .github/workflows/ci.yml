@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.1.0
+
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make test
+
+  money-safety:
+    name: Money Safety Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for TODO(money)
+        run: |
+          if grep -rn 'TODO(money)' --include='*.go' .; then
+            echo "::error::TODO(money) found in Go source — must be resolved before merge"
+            exit 1
+          fi
+      - name: Check for floats in money paths
+        run: |
+          if grep -rn 'float32\|float64' --include='*.go' . | grep -i 'price\|cost\|amount\|balance\|charge\|credit\|debit\|wallet\|invoice\|rate\b\|fee\|discount\|tax\|revenue\|money\|currency\|cent\|dollar\|total\b'; then
+            echo "::error::Float type used in a money-related path — use shopspring/decimal"
+            exit 1
+          fi
+
+  verify-manifests:
+    name: Verify Generated Manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Regenerate and diff
+        run: |
+          make manifests generate
+          if [ -n "$(git diff --name-only)" ]; then
+            echo "::error::Generated files are out of date. Run 'make manifests generate' and commit."
+            git diff --stat
+            exit 1
+          fi
+
+  image-build:
+    name: Container Image Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build image
+        run: |
+          make docker-build CONTAINER_TOOL=docker IMG=platform-billing-operator:ci-${{ github.sha }}
+
+  test-e2e:
+    name: E2E Tests (kind)
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    if: false  # Disabled until Phase 2 provides CRDs to test against
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install kind
+        run: |
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+      - name: Run e2e tests
+        run: make test-e2e

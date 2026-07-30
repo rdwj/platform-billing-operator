@@ -1,0 +1,13 @@
+{
+  "schema_version": "usage.v1",
+  "record_id": "wl-9be2c1d4-interval-0007",
+  "occurred_at": "2026-07-29T15:00:00Z",
+  "tenant_id": "ten-helix",
+  "source": { "profile": "gpuaas", "collector": "kueue-collector" },
+  "sku": "h200-mig-3g.40gb",
+  "geo": "us-east-1",
+  "quantities": { "gpu_seconds": 3600, "slice_fraction": 0.375 },
+  "status": "ok",
+  "interval": { "start": "2026-07-29T14:00:00Z", "end": "2026-07-29T15:00:00Z", "seq": 7 },
+  "attributes": { "queue": "team-ml-batch", "workload": "train-run-42" }
+}

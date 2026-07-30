@@ -1,0 +1,17 @@
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: Plan
+metadata:
+  name: priority
+  namespace: platform-billing
+spec:
+  limits:
+    requestsPerMinute: 600
+    tokensPerMinute: 2000000
+    tokensPerDay: 400000000
+    maxConcurrency: 64
+  modelScopes: ["llama-3-*", "granite-*"]
+  geoScopes: ["*"]
+  queueClass: priority
+  gatewayRef:
+    name: data-science-gateway
+    namespace: openshift-ingress
