@@ -21,6 +21,7 @@ CREATE TABLE invoice_lines (
   PRIMARY KEY (invoice_id, line_no)
 );
 -- Finalized invoices are append-only; 'accruing' rows may be updated.
+-- +goose StatementBegin
 CREATE FUNCTION invoices_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   IF TG_OP = 'DELETE' THEN
@@ -31,6 +32,7 @@ BEGIN
   END IF;
   RETURN NEW;
 END $$;
+-- +goose StatementEnd
 CREATE TRIGGER invoices_guard BEFORE UPDATE OR DELETE ON invoices FOR EACH ROW EXECUTE FUNCTION invoices_guard();
 
 -- +goose Down

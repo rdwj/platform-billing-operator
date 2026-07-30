@@ -29,12 +29,12 @@ func NewIngester(store *Store) (*Ingester, error) {
 // DLQ for unknown schemas and conflicting content.
 func (ing *Ingester) IngestEvent(ctx context.Context, rawJSON json.RawMessage) (IngestResult, error) {
 	if err := validateEvent(ing.schema, rawJSON); err != nil {
-		return ValidationFailed, fmt.Errorf("schema validation: %w", err)
+		return ValidationFailed, nil
 	}
 
 	var ev rawEvent
 	if err := json.Unmarshal(rawJSON, &ev); err != nil {
-		return ValidationFailed, fmt.Errorf("parse event: %w", err)
+		return ValidationFailed, nil
 	}
 
 	contentHash := computeHash(rawJSON)

@@ -27,12 +27,6 @@ func (s *IngestServiceServer) IngestEvent(ctx context.Context, req *ledgerv1.Ing
 
 	result, err := s.ingester.IngestEvent(ctx, json.RawMessage(req.EventJson))
 	if err != nil {
-		if result == ledger.ValidationFailed {
-			return &ledgerv1.IngestEventResponse{
-				Result:  ledgerv1.IngestResult_INGEST_RESULT_VALIDATION_FAILED,
-				Message: err.Error(),
-			}, nil
-		}
 		return nil, status.Errorf(codes.Internal, "ingest failed: %v", err)
 	}
 

@@ -32,10 +32,12 @@ CREATE INDEX adjustments_tenant_created ON adjustments (tenant_id, created_at);
 
 -- Append-only enforcement (ledger-schema.md "Cross-cutting: Audit"):
 -- corrections are new adjustment rows; UPDATE/DELETE on money tables is a bug.
+-- +goose StatementBegin
 CREATE FUNCTION ledger_append_only() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   RAISE EXCEPTION 'ledger table % is append-only (attempted %)', TG_TABLE_NAME, TG_OP;
 END $$;
+-- +goose StatementEnd
 CREATE TRIGGER charges_append_only     BEFORE UPDATE OR DELETE ON charges     FOR EACH ROW EXECUTE FUNCTION ledger_append_only();
 CREATE TRIGGER adjustments_append_only BEFORE UPDATE OR DELETE ON adjustments FOR EACH ROW EXECUTE FUNCTION ledger_append_only();
 

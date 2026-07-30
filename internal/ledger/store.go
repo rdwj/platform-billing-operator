@@ -105,13 +105,14 @@ func (s *Store) InsertDLQ(ctx context.Context, raw json.RawMessage, reason, sour
 }
 
 func (s *Store) AdvanceWatermark(ctx context.Context, ts time.Time) error {
+	tsStr := ts.UTC().Format(time.RFC3339Nano)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO ledger_meta (key, value, updated_at)
-		VALUES ('watermark_ts', $1::text, now())
+		VALUES ('watermark_ts', $1, now())
 		ON CONFLICT (key) DO UPDATE
 		SET value = EXCLUDED.value, updated_at = now()
-		WHERE ledger_meta.value::timestamptz < $1`,
-		ts,
+		WHERE ledger_meta.value::timestamptz < $1::timestamptz`,
+		tsStr,
 	)
 	return err
 }

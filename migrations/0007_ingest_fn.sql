@@ -4,6 +4,7 @@
 -- silent duplicate; a re-send with DIFFERENT content NEVER overwrites — it
 -- lands in the DLQ as 'dedup_conflict'. ledger-svc (Go) implements the same
 -- contract; this function makes the semantics executable + testable in SQL.
+-- +goose StatementBegin
 CREATE FUNCTION ledger_ingest_event(ev jsonb) RETURNS text LANGUAGE plpgsql AS $$
 DECLARE
   hash text := encode(sha256(convert_to(ev::text, 'UTF8')), 'hex');
@@ -45,6 +46,7 @@ BEGIN
   ON CONFLICT (record_id) DO NOTHING;   -- race-safe: concurrent identical insert
   RETURN 'inserted';
 END $$;
+-- +goose StatementEnd
 
 -- +goose Down
 DROP FUNCTION ledger_ingest_event;
