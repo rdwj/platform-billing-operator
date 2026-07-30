@@ -68,6 +68,19 @@ jobs:
             exit 1
           fi
 
+  ledger-test:
+    name: Ledger Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Run ledger integration tests
+        run: make test-integration
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
+
   image-build:
     name: Container Image Build
     runs-on: ubuntu-latest

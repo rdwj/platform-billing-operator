@@ -265,6 +265,10 @@ deploy-dev: manifests kustomize ## Deploy operator to the dev cluster
 	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
 	$(KUSTOMIZE) build config/default | $(KUBECTL) --context $(CLUSTER_CONTEXT) apply -f -
 
+.PHONY: deploy-ledger-dev
+deploy-ledger-dev: setup-postgres ## Deploy ledger-svc to the dev kind cluster
+	$(KUBECTL) --context $(CLUSTER_CONTEXT) apply -k config/ledger/
+
 .PHONY: undeploy-dev
 undeploy-dev: kustomize ## Remove operator from the dev cluster
 	$(KUSTOMIZE) build config/default | $(KUBECTL) --context $(CLUSTER_CONTEXT) delete --ignore-not-found=true -f -

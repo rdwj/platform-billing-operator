@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-svc
+  namespace: billing-system
+  labels:
+    app: ledger-svc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ledger-svc
+  template:
+    metadata:
+      labels:
+        app: ledger-svc
+    spec:
+      containers:
+        - name: ledger-svc
+          image: ledger-svc:latest
+          ports:
+            - containerPort: 50051
+              name: grpc
+          env:
+            - name: LEDGER_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: billing-ledger-postgres
+                  key: DSN
+            - name: LEDGER_LISTEN
+              value: ":50051"
+            - name: LEDGER_MIGRATIONS_DIR
+              value: /migrations
+          readinessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

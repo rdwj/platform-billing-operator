@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledger-svc
+  namespace: billing-system
+  labels:
+    app: ledger-svc
+spec:
+  selector:
+    app: ledger-svc
+  ports:
+    - port: 50051
+      targetPort: 50051
+      name: grpc
