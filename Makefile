@@ -168,6 +168,10 @@ proto-breaking: buf ## Check for breaking proto changes against main.
 build: manifests generate fmt vet ## Build manager binary.
 	go build -o bin/manager cmd/main.go
 
+.PHONY: ledger-svc
+ledger-svc: fmt vet ## Build ledger-svc binary.
+	go build -o bin/ledger-svc ./cmd/ledger-svc/
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
