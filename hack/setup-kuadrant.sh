@@ -61,7 +61,37 @@ helm install kuadrant-operator kuadrant/kuadrant-operator \
   --version "${KUADRANT_VERSION}" \
   --namespace kuadrant-system --create-namespace \
   --kube-context "$CLUSTER_CONTEXT" \
-  --wait --timeout 900s
+  --timeout 1200s
+
+info "Waiting for Kuadrant operator pods to become ready"
+DEADLINE=$((SECONDS + 1200))
+while true; do
+  if kctl wait --for=condition=Available deployment --all -n kuadrant-system --timeout=30s 2>/dev/null; then
+    break
+  fi
+  if [ $SECONDS -ge $DEADLINE ]; then
+    echo "ERROR: Kuadrant pods not ready after 1200s"
+    echo "=== Pod status ==="
+    kctl get pods -n kuadrant-system -o wide 2>/dev/null || true
+    echo "=== Events ==="
+    kctl get events -n kuadrant-system --sort-by='.lastTimestamp' 2>/dev/null || true
+    echo "=== Describe non-ready pods ==="
+    kctl get pods -n kuadrant-system -o json 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for pod in data.get('items', []):
+    ready = all(cs.get('ready', False) for cs in pod.get('status', {}).get('containerStatuses', []))
+    if not ready:
+        print(f'--- {pod[\"metadata\"][\"name\"]} ---')
+        for cs in pod.get('status', {}).get('containerStatuses', []):
+            print(f'  {cs[\"name\"]}: ready={cs.get(\"ready\")}, state={cs.get(\"state\", {})}')
+" 2>/dev/null || true
+    exit 1
+  fi
+  echo "  Pods not ready yet (${SECONDS}s elapsed):"
+  kctl get pods -n kuadrant-system --no-headers 2>/dev/null | while read line; do echo "    $line"; done
+  sleep 30
+done
 
 # ---------- Kuadrant CR ----------
 info "Creating Kuadrant CR"

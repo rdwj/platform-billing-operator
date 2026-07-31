@@ -151,6 +151,10 @@ jobs:
       - name: Collect logs on failure
         if: failure()
         run: |
+          echo "=== Kuadrant pods ==="
+          kubectl get pods -n kuadrant-system -o wide 2>/dev/null || true
+          echo "=== Kuadrant events ==="
+          kubectl get events -n kuadrant-system --sort-by='.lastTimestamp' 2>/dev/null || true
           echo "=== Operator logs ==="
           kubectl logs -l control-plane=controller-manager -n platform-billing-operator-system --tail=100 2>/dev/null || true
           echo "=== Events ==="
@@ -201,6 +205,10 @@ jobs:
       - name: Collect logs on failure
         if: failure()
         run: |
+          echo "=== Kuadrant pods ==="
+          kubectl get pods -n kuadrant-system -o wide 2>/dev/null || true
+          echo "=== Kuadrant events ==="
+          kubectl get events -n kuadrant-system --sort-by='.lastTimestamp' 2>/dev/null || true
           echo "=== Operator logs ==="
           kubectl logs -l control-plane=controller-manager -n platform-billing-operator-system --tail=100 2>/dev/null || true
           echo "=== Ledger-svc logs ==="
