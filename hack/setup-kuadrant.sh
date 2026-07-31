@@ -63,6 +63,21 @@ helm install kuadrant-operator kuadrant/kuadrant-operator \
   --kube-context "$CLUSTER_CONTEXT" \
   --timeout 1200s
 
+# The Kuadrant chart has no configurable values for resource requests.
+# On kind (single-node, 4 vCPU runner), the default 200m CPU request per
+# operator exhausts allocatable CPU after cert-manager + Istio + 3 other
+# Kuadrant operators are scheduled. Reduce requests so all 4 fit.
+if [[ "$CLUSTER_CONTEXT" == kind-* ]]; then
+  info "Reducing CPU requests for kind cluster"
+  for deploy in authorino-operator dns-operator-controller-manager \
+                limitador-operator-controller-manager kuadrant-operator-controller-manager; do
+    kctl patch deployment "$deploy" -n kuadrant-system --type=json \
+      -p '[{"op":"replace","path":"/spec/template/spec/containers/0/resources/requests/cpu","value":"50m"},
+           {"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/cpu","value":"200m"}]' \
+      2>/dev/null || true
+  done
+fi
+
 info "Waiting for Kuadrant operator pods to become ready"
 DEADLINE=$((SECONDS + 1200))
 while true; do
