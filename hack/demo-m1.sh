@@ -415,7 +415,7 @@ EOF
   }' >/dev/null 2>&1 || echo "  NOTE: gateway patch may need manual adjustment"
 
   echo "  Waiting for gateway rollout after WASM mount..."
-  wait_for_rollout "$GW_DEPLOY" "$NS" 120 || fail "Gateway not ready after WASM patch"
+  wait_for_rollout "$GW_DEPLOY" "$NS" 300 || fail "Gateway not ready after WASM patch"
   pass "Gateway restarted with WASM volume"
 
   # Configure gateway egress so Envoy discovers the ledger-svc cluster.

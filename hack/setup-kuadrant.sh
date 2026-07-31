@@ -76,6 +76,11 @@ if [[ "$CLUSTER_CONTEXT" == kind-* ]]; then
            {"op":"replace","path":"/spec/template/spec/containers/0/resources/limits/cpu","value":"200m"}]' \
       2>/dev/null || true
   done
+  info "Waiting for patched rollouts to complete"
+  for deploy in authorino-operator dns-operator-controller-manager \
+                limitador-operator-controller-manager kuadrant-operator-controller-manager; do
+    kctl rollout status "deployment/$deploy" -n kuadrant-system --timeout=120s 2>/dev/null || true
+  done
 fi
 
 info "Waiting for Kuadrant operator pods to become ready"
