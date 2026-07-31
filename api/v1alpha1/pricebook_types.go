@@ -119,6 +119,22 @@ type PriceBookSpec struct {
 	// +optional
 	Supersedes string `json:"supersedes,omitempty"`
 
+	// ProviderFaultPolicy controls charging when the upstream model returns an error.
+	// "zero_charge" (default): no charge for upstream failures.
+	// "bill_partial": charge for any partial usage before the failure.
+	// +kubebuilder:validation:Enum=zero_charge;bill_partial
+	// +kubebuilder:default="zero_charge"
+	// +optional
+	ProviderFaultPolicy string `json:"providerFaultPolicy,omitempty"`
+
+	// ClientDisconnectPolicy controls charging when the client disconnects mid-stream.
+	// "bill_partial" (default): charge for tokens delivered before disconnect.
+	// "zero_charge": no charge on client disconnect.
+	// +kubebuilder:validation:Enum=bill_partial;zero_charge
+	// +kubebuilder:default="bill_partial"
+	// +optional
+	ClientDisconnectPolicy string `json:"clientDisconnectPolicy,omitempty"`
+
 	// SKUs is the list of SKU pricing entries. At least one SKU is required.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
