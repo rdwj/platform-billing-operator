@@ -176,6 +176,12 @@ build: manifests generate fmt vet ## Build manager binary.
 ledger-svc: fmt vet ## Build ledger-svc binary.
 	go build -o bin/ledger-svc ./cmd/ledger-svc/
 
+.PHONY: capture-filter
+capture-filter: ## Build capture-filter WASM binary.
+	cd cmd/capture-filter && cargo build --target wasm32-wasip1 --release
+	mkdir -p bin
+	cp cmd/capture-filter/target/wasm32-wasip1/release/capture_filter.wasm bin/
+
 .PHONY: run
 run: manifests generate fmt vet ## Run a controller from your host.
 	go run ./cmd/main.go
@@ -279,7 +285,7 @@ demo-m0: ## Run M0 end-to-end demo (Plan → Kuadrant CRs → drift detection)
 
 .PHONY: demo-m1
 demo-m1: ## Run M1 demo (capture + ledger ingest)
-	@echo "demo-m1: not yet implemented"
+	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-m1.sh
 
 .PHONY: demo-m2
 demo-m2: ## Run M2 demo (rating + wallet + billing-api)

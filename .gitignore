@@ -40,5 +40,8 @@ notes.md
 # Local binaries
 bin/
 
+# Rust/Cargo build artifacts
+cmd/capture-filter/target/
+
 # Container build artifacts
 Containerfile.cross
