@@ -12,6 +12,6 @@ RUN CGO_ENABLED=0 go build -o ledger-svc ./cmd/ledger-svc/
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
 COPY --from=builder /workspace/ledger-svc .
-COPY migrations/ /migrations/
+COPY --chmod=644 migrations/ /migrations/
 USER 65532:65532
 ENTRYPOINT ["/ledger-svc"]

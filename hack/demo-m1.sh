@@ -39,6 +39,7 @@ SKIP_DEPLOY="${SKIP_DEPLOY:-false}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 KIND_CLUSTER="${CTX#kind-}"
+export KIND_EXPERIMENTAL_PROVIDER="${KIND_EXPERIMENTAL_PROVIDER:-podman}"
 
 PASS=0
 FAIL=0
@@ -376,9 +377,10 @@ EOF
   echo "  Deploying capture filter..."
 
   # Create ConfigMap from the WASM binary.
+  kctl delete configmap capture-filter-wasm -n "$NS" --ignore-not-found >/dev/null 2>&1
   kctl create configmap capture-filter-wasm \
     --from-file=capture_filter.wasm="$REPO_ROOT/bin/capture_filter.wasm" \
-    -n "$NS" --dry-run=client -o yaml | kctl apply -f - >/dev/null
+    -n "$NS" >/dev/null
   pass "Capture filter ConfigMap created"
 
   # Patch the Istio gateway deployment to mount the ConfigMap. Istio
@@ -415,6 +417,25 @@ EOF
   echo "  Waiting for gateway rollout after WASM mount..."
   wait_for_rollout "$GW_DEPLOY" "$NS" 120 || fail "Gateway not ready after WASM patch"
   pass "Gateway restarted with WASM volume"
+
+  # Configure gateway egress so Envoy discovers the ledger-svc cluster.
+  # Without this, the gateway only has clusters for routed backends.
+  kctl apply -n "$NS" -f - <<EOF >/dev/null
+apiVersion: networking.istio.io/v1
+kind: Sidecar
+metadata:
+  name: gateway-egress
+spec:
+  workloadSelector:
+    labels:
+      istio.io/gateway-name: billing-demo-gateway
+  egress:
+    - hosts:
+        - "./*"
+        - "istio-system/*"
+        - "billing-system/*"
+EOF
+  pass "Gateway egress Sidecar configured"
 
   # Create the WasmPlugin CR. Use file:// URL since the binary is
   # mounted from the ConfigMap.

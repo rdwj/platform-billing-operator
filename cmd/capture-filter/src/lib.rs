@@ -148,6 +148,7 @@ impl RootContext for CaptureRoot {
             sse_buffer: String::new(),
             captured_usage: None,
             usage_emitted: false,
+            dispatch_pending: false,
         }))
     }
 }
@@ -178,6 +179,9 @@ struct CaptureFilter {
     captured_usage: Option<UsageData>,
     /// Guard to prevent duplicate emission.
     usage_emitted: bool,
+    /// True after dispatch_http_call — pause the response until
+    /// on_http_call_response fires so the context stays alive.
+    dispatch_pending: bool,
 }
 
 impl Context for CaptureFilter {
@@ -188,7 +192,9 @@ impl Context for CaptureFilter {
         body_size: usize,
         _num_trailers: usize,
     ) {
-        // Log the ledger-svc ingest response for operational debugging.
+        self.dispatch_pending = false;
+        self.resume_http_response();
+
         if let Ok(Some(status)) = self.get_http_call_response_header(":status") {
             if !status.starts_with('2') {
                 let body_msg = self
@@ -228,6 +234,12 @@ impl HttpContext for CaptureFilter {
                 self.context_id
             );
         }
+
+        // Remove Content-Length so we can safely modify the body in
+        // on_http_request_body (inject include_usage). With HTTP/2, Envoy
+        // uses DATA frame lengths for framing; a stale Content-Length
+        // from the original request causes a 400 after body modification.
+        let _ = self.set_http_request_header("content-length", None);
 
         Action::Continue
     }
@@ -432,6 +444,9 @@ impl CaptureFilter {
             }
         }
 
+        if self.dispatch_pending {
+            return Action::Pause;
+        }
         Action::Continue
     }
 
@@ -477,6 +492,9 @@ impl CaptureFilter {
             }
         }
 
+        if self.dispatch_pending {
+            return Action::Pause;
+        }
         Action::Continue
     }
 
@@ -633,14 +651,18 @@ impl CaptureFilter {
             }
         };
 
-        // The "ledger-svc" cluster name must match the Envoy cluster configured
-        // in the WasmPlugin or EnvoyFilter manifest.
+        // The cluster name must match the Envoy cluster; the authority must
+        // be a valid hostname (no pipe characters from Istio's cluster naming).
+        let authority = ledger_cluster
+            .split("||")
+            .nth(1)
+            .unwrap_or("ledger-svc");
         let result = self.dispatch_http_call(
             &ledger_cluster,
             vec![
                 (":method", "POST"),
                 (":path", "/v1/ingest"),
-                (":authority", &ledger_cluster),
+                (":authority", authority),
                 ("content-type", "application/json"),
             ],
             Some(&body),
@@ -650,6 +672,7 @@ impl CaptureFilter {
 
         match result {
             Ok(token) => {
+                self.dispatch_pending = true;
                 info!(
                     "capture-filter[{}]: dispatched usage.v1 to {} \
                      (call_token={}, record_id={}, tokens={})",
