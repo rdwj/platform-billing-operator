@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fake-openai
+  namespace: billing-demo
+  labels:
+    app: fake-openai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fake-openai
+  template:
+    metadata:
+      labels:
+        app: fake-openai
+        sidecar.istio.io/inject: "true"
+    spec:
+      containers:
+        - name: fake-openai
+          image: fake-openai:latest
+          args: ["-addr", ":8080"]
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi

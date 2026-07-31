@@ -1,0 +1,15 @@
+apiVersion: extensions.istio.io/v1alpha1
+kind: WasmPlugin
+metadata:
+  name: capture-filter
+  namespace: billing-demo
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: billing-demo-gateway
+  url: oci://localhost:5000/capture-filter:latest
+  phase: STATS
+  pluginConfig:
+    ledger_cluster: "outbound|8080||ledger-svc.billing-demo.svc.cluster.local"
+  failStrategy: FAIL_OPEN
