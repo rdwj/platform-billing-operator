@@ -39,4 +39,12 @@ e2e demo script green in CI (not laptop); docs page updated; `config/samples/` h
 
 ## Toolchain
 
-Go 1.22+, operator-sdk/kubebuilder v4 layout, controller-runtime, `shopspring/decimal`, `pgx`, Kuadrant API types per RECON R2, Stripe Go SDK (psp-connector only, M4). Repo layout per `operator-plan/README.md` (adjust `cmd/capture-extproc/` per the ADR-0006 outcome).
+Go 1.22+, operator-sdk/kubebuilder v4 layout, controller-runtime, `shopspring/decimal`, `pgx`, Kuadrant API types per RECON R2, Stripe Go SDK (psp-connector only, M4). Rust (stable, wasm32-wasip1) for the capture filter — proxy-wasm-rust-sdk pinned to Kuadrant's fork rev `6ceedbb`. Repo layout per `operator-plan/README.md` (adjust `cmd/capture-extproc/` per the ADR-0006 outcome).
+
+## Lessons learned (capture filter, 2026-07-31)
+
+- **proxy-wasm dispatch_http_call context lifetime.** The HTTP context is destroyed when the response completes. If you dispatch an async HTTP call and return `Action::Continue`, the context dies before the callback fires (`proxy_on_http_call_response invalid context_id`). Fix: return `Action::Pause` after dispatching, then `resume_http_response()` in `on_http_call_response`.
+- **Istio cluster names as HTTP authority.** Istio names clusters `outbound|8080||host.ns.svc.cluster.local` with pipe characters. Go's `net/http` rejects these as malformed Host headers. Extract the hostname portion for the `:authority` pseudo-header.
+- **HTTP/2 Content-Length and body modification.** When a WASM filter modifies the request body (e.g., injecting `include_usage`), the Content-Length was already sent in HTTP/2 HEADERS. The size mismatch causes Envoy to return 400. Fix: remove Content-Length in `on_http_request_headers` before body modification so Envoy uses DATA frame lengths.
+- **Istio gateway cluster discovery.** Gateway proxies only auto-discover Envoy clusters for services in their HTTPRoutes. For `dispatch_http_call` to an internal service (ledger-svc), configure a Sidecar egress resource on the gateway workload.
+- **setup-postgres.sh vs goose migrations.** `setup-postgres.sh` applies migrations via plain psql; ledger-svc applies via goose. These conflict if both run on the same DB (goose doesn't see psql-applied migrations). The demo script resets the schema and lets goose run fresh.
