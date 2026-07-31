@@ -160,3 +160,61 @@ jobs:
       - name: Cleanup
         if: always()
         run: kind delete cluster --name platform-billing-dev
+
+  demo-m1:
+    name: M1 Demo (kind + Kuadrant + Postgres + Capture)
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+      - name: Install tools
+        run: |
+          # kind
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          # helm
+          curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+      - name: Build capture filter
+        run: make capture-filter
+      - name: Create kind cluster
+        run: |
+          kind create cluster --name platform-billing-dev --wait 60s
+        env:
+          KIND_EXPERIMENTAL_PROVIDER: docker
+      - name: Install Kuadrant stack
+        run: |
+          KUBECTL=kubectl hack/setup-kuadrant.sh kind-platform-billing-dev
+      - name: Deploy Postgres
+        run: |
+          KUBECTL=kubectl SKIP_MIGRATIONS=true hack/setup-postgres.sh kind-platform-billing-dev
+      - name: Run M1 demo
+        run: |
+          KUBECTL=kubectl CLUSTER_CONTEXT=kind-platform-billing-dev CONTAINER_TOOL=docker KIND_EXPERIMENTAL_PROVIDER=docker make demo-m1
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Operator logs ==="
+          kubectl logs -l control-plane=controller-manager -n platform-billing-operator-system --tail=100 2>/dev/null || true
+          echo "=== Ledger-svc logs ==="
+          kubectl logs -l app=ledger-svc -n billing-demo --tail=100 2>/dev/null || true
+          echo "=== Events (billing-demo) ==="
+          kubectl get events -n billing-demo --sort-by='.lastTimestamp' 2>/dev/null || true
+          echo "=== Events (billing-system) ==="
+          kubectl get events -n billing-system --sort-by='.lastTimestamp' 2>/dev/null || true
+          echo "=== Kuadrant CRs ==="
+          kubectl get tokenratelimitpolicies,ratelimitpolicies,authpolicies,wasmplugins -A 2>/dev/null || true
+          echo "=== Postgres tables ==="
+          kubectl exec -n billing-system deploy/postgres -- psql -U billing -d billing_ledger -c '\dt' 2>/dev/null || true
+          echo "=== usage_events ==="
+          kubectl exec -n billing-system deploy/postgres -- psql -U billing -d billing_ledger -c 'SELECT * FROM usage_events ORDER BY ingested_at;' 2>/dev/null || true
+      - name: Cleanup
+        if: always()
+        run: kind delete cluster --name platform-billing-dev

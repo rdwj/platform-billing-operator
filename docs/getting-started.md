@@ -118,3 +118,48 @@ make demo-m0
 ```
 
 This runs the M0 end-to-end validation: creates a PriceBook and Plan, verifies compiled CRs, tests drift detection and re-stamp, verifies cleanup on delete, checks unsupported field conditions, and validates PriceBook immutability.
+
+## M1: Metering pipeline
+
+M1 adds usage metering to the billing stack. A Rust WASM capture filter sits in the Istio gateway's Envoy filter chain, intercepts inference responses (streaming and non-streaming), extracts token usage, and POSTs events to ledger-svc. The ledger upserts idempotently into Postgres. The full data flow is documented in the planning repo (`planning/project-plan/architecture.md`).
+
+### Additional prerequisites
+
+- Postgres 16 (deployed automatically by the setup script below)
+- Rust toolchain with the `wasm32-wasip1` target:
+  ```bash
+  rustup target add wasm32-wasip1
+  ```
+
+### Set up the ledger database
+
+```bash
+make setup-postgres
+```
+
+This deploys Postgres 16 into the `billing-system` namespace with the `billing_ledger` database. Migrations are applied by ledger-svc on startup via [goose](https://github.com/pressly/goose).
+
+### Build the capture filter
+
+```bash
+make capture-filter
+```
+
+This compiles the Rust WASM filter to `bin/capture_filter.wasm`. The filter runs inside Envoy via the WasmPlugin CRD.
+
+### Run the M1 demo
+
+```bash
+make demo-m1
+```
+
+The demo deploys fake-openai (a fault-injectable OpenAI-compatible upstream), ledger-svc, and the capture filter into the kind cluster, then validates all six M1 exit criteria:
+
+1. Streaming request produces a correct ledger row with token splits
+2. Non-streaming request produces a correct ledger row
+3. Duplicate events are deduplicated on `record_id`
+4. Client disconnect produces a `client_disconnect` status row
+5. Upstream 5xx produces an `upstream_error` status row
+6. Removing the filter does not disrupt serving (fail-open)
+
+Expected output: 24 checks, all PASS.

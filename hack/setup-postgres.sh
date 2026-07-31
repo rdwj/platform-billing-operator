@@ -19,6 +19,7 @@ POSTGRES_USER="billing"
 POSTGRES_PASSWORD="billing-dev-password"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 MIGRATIONS_DIR="${SCRIPT_DIR}/../migrations"
+SKIP_MIGRATIONS="${SKIP_MIGRATIONS:-false}"
 
 info() { echo "=== $* ==="; }
 kctl() { "$KUBECTL" --context "$CLUSTER_CONTEXT" "$@"; }
@@ -112,15 +113,19 @@ kctl wait --for=condition=Available deployment/postgres -n "$POSTGRES_NS" --time
 POSTGRES_POD=$(kctl get pod -n "$POSTGRES_NS" -l app=postgres -o jsonpath='{.items[0].metadata.name}')
 kctl wait --for=condition=Ready "pod/${POSTGRES_POD}" -n "$POSTGRES_NS" --timeout=60s
 
-info "Applying migrations (${MIGRATIONS_DIR})"
-for f in "${MIGRATIONS_DIR}"/000*.sql; do
-  fname=$(basename "$f")
-  echo "  Applying ${fname}..."
-  # Strip goose Down section for plain-psql application
-  sed -n '/-- +goose Down/q;p' "$f" | \
-    kctl exec -i -n "$POSTGRES_NS" "${POSTGRES_POD}" -- \
-      psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f - >/dev/null
-done
+if [ "$SKIP_MIGRATIONS" != "true" ]; then
+  info "Applying migrations (${MIGRATIONS_DIR})"
+  for f in "${MIGRATIONS_DIR}"/000*.sql; do
+    fname=$(basename "$f")
+    echo "  Applying ${fname}..."
+    # Strip goose Down section for plain-psql application
+    sed -n '/-- +goose Down/q;p' "$f" | \
+      kctl exec -i -n "$POSTGRES_NS" "${POSTGRES_POD}" -- \
+        psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -f - >/dev/null
+  done
+else
+  info "Skipping migrations (SKIP_MIGRATIONS=true)"
+fi
 
 info "Postgres setup complete"
 echo "  Context:   ${CLUSTER_CONTEXT}"
