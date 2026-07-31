@@ -1,0 +1,11 @@
+FROM golang:1.26 AS builder
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY test/loadgen/ test/loadgen/
+RUN CGO_ENABLED=0 go build -o loadgen ./test/loadgen/
+
+FROM gcr.io/distroless/static:nonroot
+COPY --from=builder /workspace/loadgen /loadgen
+USER 65532:65532
+ENTRYPOINT ["/loadgen"]

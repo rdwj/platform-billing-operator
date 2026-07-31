@@ -176,6 +176,10 @@ build: manifests generate fmt vet ## Build manager binary.
 ledger-svc: fmt vet ## Build ledger-svc binary.
 	go build -o bin/ledger-svc ./cmd/ledger-svc/
 
+.PHONY: loadgen
+loadgen: ## Build load-test harness for metering pipeline benchmarks.
+	go build -o bin/loadgen ./test/loadgen/
+
 .PHONY: capture-filter
 capture-filter: ## Build capture-filter WASM binary.
 	cd cmd/capture-filter && cargo build --target wasm32-wasip1 --release
