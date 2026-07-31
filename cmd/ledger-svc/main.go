@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
 	"github.com/rdwj/platform-billing-operator/internal/ledger/grpcapi"
+	"github.com/rdwj/platform-billing-operator/internal/ledger/httpapi"
 )
 
 func main() {
@@ -18,9 +20,13 @@ func main() {
 	if dsn == "" {
 		log.Fatal("LEDGER_DSN is required")
 	}
-	listen := os.Getenv("LEDGER_LISTEN")
-	if listen == "" {
-		listen = ":50051"
+	listenGRPC := os.Getenv("LEDGER_LISTEN")
+	if listenGRPC == "" {
+		listenGRPC = ":50051"
+	}
+	listenHTTP := os.Getenv("LEDGER_HTTP_LISTEN")
+	if listenHTTP == "" {
+		listenHTTP = ":8080"
 	}
 	migrationsDir := os.Getenv("LEDGER_MIGRATIONS_DIR")
 	if migrationsDir == "" {
@@ -47,11 +53,18 @@ func main() {
 	}
 	querier := ledger.NewQuerier(store)
 
-	srv := grpcapi.NewServer(ingester, querier)
-
-	lis, err := net.Listen("tcp", listen)
+	// gRPC server
+	grpcSrv := grpcapi.NewServer(ingester, querier)
+	grpcLis, err := net.Listen("tcp", listenGRPC)
 	if err != nil {
-		log.Fatalf("listen on %s: %v", listen, err)
+		log.Fatalf("listen gRPC on %s: %v", listenGRPC, err)
+	}
+
+	// HTTP server (convenience endpoint for WASM capture filter)
+	httpHandler := httpapi.NewServer(ingester)
+	httpSrv := &http.Server{
+		Addr:    listenHTTP,
+		Handler: httpHandler,
 	}
 
 	sigCh := make(chan os.Signal, 1)
@@ -59,12 +72,20 @@ func main() {
 	go func() {
 		sig := <-sigCh
 		fmt.Fprintf(os.Stderr, "received %s, shutting down\n", sig)
-		srv.GracefulStop()
+		grpcSrv.GracefulStop()
+		httpSrv.Shutdown(ctx) //nolint:errcheck
 		cancel()
 	}()
 
-	log.Printf("ledger-svc listening on %s", listen)
-	if err := srv.Serve(lis); err != nil {
-		log.Fatalf("serve: %v", err)
+	go func() {
+		log.Printf("ledger-svc HTTP listening on %s", listenHTTP)
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("http serve: %v", err)
+		}
+	}()
+
+	log.Printf("ledger-svc gRPC listening on %s", listenGRPC)
+	if err := grpcSrv.Serve(grpcLis); err != nil {
+		log.Fatalf("grpc serve: %v", err)
 	}
 }

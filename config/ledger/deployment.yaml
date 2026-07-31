@@ -21,6 +21,8 @@ spec:
           ports:
             - containerPort: 50051
               name: grpc
+            - containerPort: 8080
+              name: http
           env:
             - name: LEDGER_DSN
               valueFrom:
@@ -29,6 +31,8 @@ spec:
                   key: DSN
             - name: LEDGER_LISTEN
               value: ":50051"
+            - name: LEDGER_HTTP_LISTEN
+              value: ":8080"
             - name: LEDGER_MIGRATIONS_DIR
               value: /migrations
           readinessProbe:
@@ -37,8 +41,9 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            grpc:
-              port: 50051
+            httpGet:
+              path: /healthz
+              port: 8080
             initialDelaySeconds: 10
             periodSeconds: 30
           resources:
