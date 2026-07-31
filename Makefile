@@ -311,6 +311,10 @@ demo-m5: ## Run M5 demo (GPUaaS metering profile)
 demo-m6: ## Run M6 demo (console UI)
 	@echo "demo-m6: not yet implemented"
 
+.PHONY: rater-determinism
+rater-determinism: ## Verify rater determinism under repeated runs (map iteration, sort stability)
+	go test ./internal/rater/ -run TestDeterminism -count 10
+
 .PHONY: money-safety
 money-safety: ## Check for money-safety violations (TODO(money), float-in-money-path)
 	@echo "Checking for TODO(money)..."

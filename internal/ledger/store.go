@@ -224,6 +224,77 @@ func (s *Store) QueryEvents(ctx context.Context, f QueryFilter) (*QueryResult, e
 	return result, nil
 }
 
+// QueryUnratedEvents returns usage events that have no corresponding row in
+// the charges table (left anti-join on record_id). The batch size is capped
+// to keep memory bounded; callers should loop until zero results.
+func (s *Store) QueryUnratedEvents(ctx context.Context, limit int) ([]UsageEvent, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT ue.record_id, COALESCE(ue.schema_ver, 'usage.v1'), ue.tenant_id, COALESCE(ue.key_id, ''),
+			ue.sku, COALESCE(ue.geo, ''), ue.profile, ue.collector,
+			ue.prompt_tokens, ue.completion_tokens, ue.reasoning_tokens, ue.cached_tokens,
+			ue.quantities, ue.status, ue.partial, COALESCE(ue.stream, false), ue.latency_ms,
+			ue.attributes, ue.content_hash, ue.event_ts, ue.ingested_at
+		FROM usage_events ue
+		WHERE NOT EXISTS (SELECT 1 FROM charges c WHERE c.record_id = ue.record_id)
+		ORDER BY ue.event_ts, ue.record_id
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query unrated events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []UsageEvent
+	for rows.Next() {
+		var ev UsageEvent
+		var quantitiesJSON, attributesJSON []byte
+		var latencyMs *float64
+		var stream bool
+
+		if err := rows.Scan(
+			&ev.RecordID, &ev.SchemaVer, &ev.TenantID, &ev.KeyID,
+			&ev.SKU, &ev.Geo, &ev.Profile, &ev.Collector,
+			&ev.PromptTokens, &ev.CompletionTokens, &ev.ReasoningTokens, &ev.CachedTokens,
+			&quantitiesJSON, &ev.Status, &ev.Partial, &stream, &latencyMs,
+			&attributesJSON, &ev.ContentHash, &ev.EventTS, &ev.IngestedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan unrated event row: %w", err)
+		}
+
+		ev.Stream = &stream
+		ev.LatencyMs = latencyMs
+		if err := json.Unmarshal(quantitiesJSON, &ev.Quantities); err != nil {
+			return nil, fmt.Errorf("unmarshal quantities: %w", err)
+		}
+		if err := json.Unmarshal(attributesJSON, &ev.Attributes); err != nil {
+			return nil, fmt.Errorf("unmarshal attributes: %w", err)
+		}
+		events = append(events, ev)
+	}
+	return events, nil
+}
+
+// InsertCharge writes a charge row to the charges table. The charges table has
+// a UNIQUE constraint on record_id — duplicate inserts are silently ignored
+// (ON CONFLICT DO NOTHING) since the rater is deterministic: re-rating the
+// same event produces the same charge.
+func (s *Store) InsertCharge(ctx context.Context, recordID, tenantID, priceBook string,
+	priceBookRev int, amount, currency string, components json.RawMessage,
+	warnings json.RawMessage, ratedAt time.Time) error {
+
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO charges (record_id, tenant_id, price_book, price_book_rev,
+			amount, currency, components, warnings, rated_at)
+		VALUES ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9)
+		ON CONFLICT (record_id) DO NOTHING`,
+		recordID, tenantID, priceBook, priceBookRev,
+		amount, currency, components, warnings, ratedAt,
+	)
+	return err
+}
+
 // Pool exposes the underlying pgxpool for integration tests that need raw SQL access.
 func (s *Store) Pool() *pgxpool.Pool {
 	return s.pool

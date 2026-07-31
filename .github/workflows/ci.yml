@@ -51,6 +51,16 @@ jobs:
             exit 1
           fi
 
+  rater-determinism:
+    name: Rater Determinism Gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: make rater-determinism
+
   verify-manifests:
     name: Verify Generated Manifests
     runs-on: ubuntu-latest
