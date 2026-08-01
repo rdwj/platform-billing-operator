@@ -32,6 +32,14 @@ rules:
   - patch
   - update
 - apiGroups:
+  - billing.opendatahub.io
+  resources:
+  - pricebooks
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - gateway.networking.k8s.io
   resources:
   - gateways
