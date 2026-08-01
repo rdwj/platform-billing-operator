@@ -297,7 +297,7 @@ demo-m1: ## Run M1 demo (capture + ledger ingest)
 
 .PHONY: demo-m2
 demo-m2: ## Run M2 demo (rating + wallet + billing-api)
-	@echo "demo-m2: not yet implemented"
+	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-m2.sh
 
 .PHONY: demo-m3
 demo-m3: ## Run M3 demo (allowance loop + wallet drain + freeze)
@@ -333,6 +333,15 @@ money-safety: ## Check for money-safety violations (TODO(money), float-in-money-
 	fi
 	@echo "Money safety: OK"
 
+.PHONY: openapi-diff
+openapi-diff: oasdiff ## Check for breaking changes in the /v1 billing API spec
+	@git show main:api/openapi.yaml > $(LOCALBIN)/.openapi-base.yaml 2>/dev/null \
+		|| cp api/openapi.yaml $(LOCALBIN)/.openapi-base.yaml
+	@$(OASDIFF) breaking $(LOCALBIN)/.openapi-base.yaml api/openapi.yaml || \
+		{ rm -f $(LOCALBIN)/.openapi-base.yaml; exit 1; }
+	@rm -f $(LOCALBIN)/.openapi-base.yaml
+	@echo "OpenAPI diff: no breaking changes"
+
 .PHONY: verify-manifests
 verify-manifests: manifests generate ## Verify generated manifests are up to date
 	@if [ -n "$$(git diff --name-only)" ]; then \
@@ -359,6 +368,7 @@ GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
 BUF ?= $(LOCALBIN)/buf
 PROTOC_GEN_GO ?= $(LOCALBIN)/protoc-gen-go
 PROTOC_GEN_GO_GRPC ?= $(LOCALBIN)/protoc-gen-go-grpc
+OASDIFF ?= $(LOCALBIN)/oasdiff
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.6.0
@@ -371,6 +381,7 @@ GOLANGCI_LINT_VERSION ?= v2.12.2
 BUF_VERSION ?= v1.72.0
 PROTOC_GEN_GO_VERSION ?= v1.36.11
 PROTOC_GEN_GO_GRPC_VERSION ?= v1.6.2
+OASDIFF_VERSION ?= v1.27.0
 
 .PHONY: kustomize
 kustomize: $(KUSTOMIZE) ## Download kustomize locally if necessary.
@@ -414,6 +425,11 @@ $(PROTOC_GEN_GO): $(LOCALBIN)
 protoc-gen-go-grpc: $(PROTOC_GEN_GO_GRPC)
 $(PROTOC_GEN_GO_GRPC): $(LOCALBIN)
 	$(call go-install-tool,$(PROTOC_GEN_GO_GRPC),google.golang.org/grpc/cmd/protoc-gen-go-grpc,$(PROTOC_GEN_GO_GRPC_VERSION))
+
+.PHONY: oasdiff
+oasdiff: $(OASDIFF)
+$(OASDIFF): $(LOCALBIN)
+	$(call go-install-tool,$(OASDIFF),github.com/oasdiff/oasdiff,$(OASDIFF_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
