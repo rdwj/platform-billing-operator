@@ -36,11 +36,12 @@ import (
 )
 
 var (
-	ctx       context.Context
-	cancel    context.CancelFunc
-	testEnv   *envtest.Environment
-	cfg       *rest.Config
-	k8sClient client.Client
+	ctx        context.Context
+	cancel     context.CancelFunc
+	testEnv    *envtest.Environment
+	cfg        *rest.Config
+	k8sClient  client.Client
+	testLedger *stubBalanceQuerier
 )
 
 func TestControllers(t *testing.T) {
@@ -73,7 +74,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
-	// Start a manager with the PlanReconciler.
+	// Start a manager with controllers.
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
 	})
@@ -82,6 +83,14 @@ var _ = BeforeSuite(func() {
 	err = (&PlanReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	testLedger = &stubBalanceQuerier{}
+	err = (&TenantAccountReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+		Ledger: testLedger,
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 

@@ -295,6 +295,62 @@ func (s *Store) InsertCharge(ctx context.Context, recordID, tenantID, priceBook 
 	return err
 }
 
+// QueryTenantBalance computes a tenant's balance from the ledger tables
+// (adjustments - charges). Returns the balance as a decimal string and the
+// timestamp of the most recent charge or adjustment. If no rows exist for
+// the tenant, returns "0" with a zero time.
+func (s *Store) QueryTenantBalance(ctx context.Context, tenantID string) (string, time.Time, error) {
+	var balance string
+	var latestAt *time.Time
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(a.total, 0) - COALESCE(c.total, 0) AS balance,
+		       GREATEST(a.latest, c.latest) AS latest_at
+		FROM (SELECT sum(amount) AS total, max(created_at) AS latest FROM adjustments WHERE tenant_id = $1) a,
+		     (SELECT sum(amount) AS total, max(rated_at)   AS latest FROM charges     WHERE tenant_id = $1) c`,
+		tenantID,
+	).Scan(&balance, &latestAt)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("query tenant balance: %w", err)
+	}
+	if latestAt == nil {
+		return "0", time.Time{}, nil
+	}
+	return balance, *latestAt, nil
+}
+
+// QueryMTDSpend returns the month-to-date charge total for a tenant as a
+// decimal string. If no charges exist for the current month, returns "0".
+func (s *Store) QueryMTDSpend(ctx context.Context, tenantID string) (string, error) {
+	var spend string
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(sum(amount), 0)
+		FROM charges
+		WHERE tenant_id = $1
+		  AND rated_at >= date_trunc('month', now())`,
+		tenantID,
+	).Scan(&spend)
+	if err != nil {
+		return "", fmt.Errorf("query mtd spend: %w", err)
+	}
+	return spend, nil
+}
+
+// UpdateWallet upserts the wallet table with the computed balance. The wallet
+// is a materialized cache for fast reads — not a source of truth.
+func (s *Store) UpdateWallet(ctx context.Context, tenantID, balance string, asOf time.Time) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO wallet (tenant_id, balance, as_of, version)
+		VALUES ($1, $2::numeric, $3, 1)
+		ON CONFLICT (tenant_id) DO UPDATE
+		SET balance = $2::numeric, as_of = $3, version = wallet.version + 1`,
+		tenantID, balance, asOf,
+	)
+	if err != nil {
+		return fmt.Errorf("update wallet: %w", err)
+	}
+	return nil
+}
+
 // Pool exposes the underlying pgxpool for integration tests that need raw SQL access.
 func (s *Store) Pool() *pgxpool.Pool {
 	return s.pool

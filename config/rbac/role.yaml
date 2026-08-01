@@ -8,6 +8,7 @@ rules:
   - billing.opendatahub.io
   resources:
   - plans
+  - tenantaccounts
   verbs:
   - get
   - list
@@ -18,12 +19,14 @@ rules:
   - billing.opendatahub.io
   resources:
   - plans/finalizers
+  - tenantaccounts/finalizers
   verbs:
   - update
 - apiGroups:
   - billing.opendatahub.io
   resources:
   - plans/status
+  - tenantaccounts/status
   verbs:
   - get
   - patch

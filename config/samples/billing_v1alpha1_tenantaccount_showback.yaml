@@ -1,0 +1,10 @@
+# ShowbackOnly demo: usage is rated and visible but no wallet/PSP enforcement.
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: TenantAccount
+metadata:
+  name: ten-acme
+  namespace: platform-billing
+spec:
+  displayName: Acme Labs
+  planRef: {name: basic}
+  billingMode: ShowbackOnly

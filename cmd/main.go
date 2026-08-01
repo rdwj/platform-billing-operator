@@ -17,22 +17,31 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"flag"
 	"os"
 	"path/filepath"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
+	"log/slog"
+
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/go-logr/logr"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/controller"
+	"github.com/rdwj/platform-billing-operator/internal/ledger"
+	"github.com/rdwj/platform-billing-operator/internal/rater"
+	raterjob "github.com/rdwj/platform-billing-operator/internal/rater/job"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -213,6 +222,58 @@ func main() {
 	if err = (&billingv1alpha1.PriceBookValidator{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "PriceBook")
 		os.Exit(1)
+	}
+
+	// --- Ledger-dependent components (balance controller + rating job) ---
+	if dsn := os.Getenv("LEDGER_DSN"); dsn != "" {
+		store, err := ledger.NewStore(context.Background(), dsn)
+		if err != nil {
+			setupLog.Error(err, "unable to connect to ledger")
+			os.Exit(1)
+		}
+
+		migrationsDir := os.Getenv("LEDGER_MIGRATIONS_DIR")
+		if migrationsDir == "" {
+			migrationsDir = "migrations"
+		}
+		if err := store.RunMigrations(migrationsDir); err != nil {
+			setupLog.Error(err, "unable to run ledger migrations")
+			os.Exit(1)
+		}
+
+		if err = (&controller.TenantAccountReconciler{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+			Ledger: store,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "TenantAccount")
+			os.Exit(1)
+		}
+
+		resolver := rater.NewK8sResolver(mgr.GetClient())
+		raterLog := slog.New(logr.ToSlogHandler(ctrl.Log.WithName("rater")))
+		ratingJob := raterjob.New(store, resolver, raterLog)
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			rlog := ctrl.Log.WithName("rating-job")
+			ticker := time.NewTicker(1 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+					if _, err := ratingJob.Tick(ctx); err != nil {
+						rlog.Error(err, "rating tick failed")
+					}
+				}
+			}
+		})); err != nil {
+			setupLog.Error(err, "unable to add rating job")
+			os.Exit(1)
+		}
+		setupLog.Info("ledger-dependent components started", "dsn", "***")
+	} else {
+		setupLog.Info("LEDGER_DSN not set; balance controller and rating job disabled")
 	}
 
 	// +kubebuilder:scaffold:builder
