@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -12,7 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/pressly/goose/v3"
+	"github.com/shopspring/decimal"
 )
+
+var ErrIdempotencyConflict = errors.New("idempotency key exists with different content")
 
 type Store struct {
 	pool *pgxpool.Pool
@@ -349,6 +353,126 @@ func (s *Store) UpdateWallet(ctx context.Context, tenantID, balance string, asOf
 		return fmt.Errorf("update wallet: %w", err)
 	}
 	return nil
+}
+
+// QueryBucketedUsage returns usage charges aggregated by time bucket and SKU.
+// The bucket parameter must be one of "hour", "day", "month" — validated
+// here before SQL interpolation. Aggregation is on the charges table (rated
+// amounts), with quantities summed from usage_events via record_id join.
+func (s *Store) QueryBucketedUsage(ctx context.Context, tenantID string, from, to time.Time, bucket, sku string) ([]UsageBucket, error) {
+	switch bucket {
+	case "hour", "day", "month":
+	default:
+		return nil, fmt.Errorf("invalid bucket %q: must be hour, day, or month", bucket)
+	}
+
+	args := []any{tenantID, from, to}
+	skuClause := ""
+	if sku != "" {
+		skuClause = "AND ue.sku = $4"
+		args = append(args, sku)
+	}
+
+	query := fmt.Sprintf(`
+		WITH charge_agg AS (
+		  SELECT date_trunc('%s', c.rated_at) AS bucket_start,
+		         ue.sku,
+		         sum(c.amount) AS charged,
+		         count(*) AS events
+		  FROM charges c
+		  JOIN usage_events ue ON ue.record_id = c.record_id
+		  WHERE c.tenant_id = $1 AND c.rated_at >= $2 AND c.rated_at < $3 %s
+		  GROUP BY 1, 2
+		),
+		qty_agg AS (
+		  SELECT date_trunc('%s', c.rated_at) AS bucket_start,
+		         ue.sku,
+		         kv.key,
+		         sum(kv.value::numeric) AS val
+		  FROM charges c
+		  JOIN usage_events ue ON ue.record_id = c.record_id
+		  CROSS JOIN LATERAL jsonb_each_text(ue.quantities) AS kv(key, value)
+		  WHERE c.tenant_id = $1 AND c.rated_at >= $2 AND c.rated_at < $3 %s
+		  GROUP BY 1, 2, 3
+		)
+		SELECT ca.bucket_start, ca.sku, ca.charged, ca.events,
+		       COALESCE(
+		         (SELECT jsonb_object_agg(q.key, q.val)
+		          FROM qty_agg q
+		          WHERE q.bucket_start = ca.bucket_start AND q.sku = ca.sku),
+		         '{}'::jsonb
+		       ) AS quantities
+		FROM charge_agg ca
+		ORDER BY ca.bucket_start, ca.sku`, bucket, skuClause, bucket, skuClause)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query bucketed usage: %w", err)
+	}
+	defer rows.Close()
+
+	var buckets []UsageBucket
+	for rows.Next() {
+		var b UsageBucket
+		var quantitiesJSON []byte
+		if err := rows.Scan(&b.Start, &b.SKU, &b.Charged, &b.Events, &quantitiesJSON); err != nil {
+			return nil, fmt.Errorf("scan usage bucket: %w", err)
+		}
+		b.Quantities = make(map[string]float64)
+		if len(quantitiesJSON) > 0 {
+			if err := json.Unmarshal(quantitiesJSON, &b.Quantities); err != nil {
+				return nil, fmt.Errorf("unmarshal bucket quantities: %w", err)
+			}
+		}
+		buckets = append(buckets, b)
+	}
+	return buckets, nil
+}
+
+// InsertAdjustment creates an adjustment record. If an idempotency_key
+// collision occurs, the existing row is returned if content matches;
+// otherwise ErrIdempotencyConflict is returned.
+func (s *Store) InsertAdjustment(ctx context.Context, adj AdjustmentInput) (AdjustmentRow, error) {
+	var row AdjustmentRow
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO adjustments (tenant_id, kind, amount, currency, reason, actor, idempotency_key)
+		VALUES ($1, $2, $3::numeric, 'USD', $4, $5, $6)
+		ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+		RETURNING adjustment_id, tenant_id, amount, kind, reason, idempotency_key, created_at`,
+		adj.TenantID, adj.Kind, adj.Amount, adj.Reason, adj.Actor, adj.IdempotencyKey,
+	).Scan(&row.ID, &row.TenantID, &row.Amount, &row.Kind, &row.Reason, &row.IdempotencyKey, &row.CreatedAt)
+
+	if err == pgx.ErrNoRows {
+		// ON CONFLICT fired — check if content matches for idempotent replay
+		err = s.pool.QueryRow(ctx, `
+			SELECT adjustment_id, tenant_id, amount, kind, reason, idempotency_key, created_at
+			FROM adjustments
+			WHERE idempotency_key = $1`,
+			adj.IdempotencyKey,
+		).Scan(&row.ID, &row.TenantID, &row.Amount, &row.Kind, &row.Reason, &row.IdempotencyKey, &row.CreatedAt)
+		if err != nil {
+			return AdjustmentRow{}, fmt.Errorf("query existing adjustment: %w", err)
+		}
+		if row.TenantID != adj.TenantID || row.Kind != adj.Kind || row.Reason != adj.Reason {
+			return AdjustmentRow{}, ErrIdempotencyConflict
+		}
+		existAmt, err := decimal.NewFromString(row.Amount)
+		if err != nil {
+			return AdjustmentRow{}, fmt.Errorf("parse existing amount: %w", err)
+		}
+		inputAmt, err := decimal.NewFromString(adj.Amount)
+		if err != nil {
+			return AdjustmentRow{}, fmt.Errorf("parse input amount: %w", err)
+		}
+		if !existAmt.Equal(inputAmt) {
+			return AdjustmentRow{}, ErrIdempotencyConflict
+		}
+		return row, nil
+	}
+	if err != nil {
+		return AdjustmentRow{}, fmt.Errorf("insert adjustment: %w", err)
+	}
+	return row, nil
 }
 
 // Pool exposes the underlying pgxpool for integration tests that need raw SQL access.

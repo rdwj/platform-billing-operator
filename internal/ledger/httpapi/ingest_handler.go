@@ -29,7 +29,7 @@ func (h *ingestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var req ingestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, ingestResponse{
-			Result:  "error",
+			Result:  "error", //nolint:goconst
 			Message: "invalid JSON body",
 		})
 		return
@@ -37,7 +37,7 @@ func (h *ingestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if req.EventJSON == "" {
 		writeJSON(w, http.StatusBadRequest, ingestResponse{
-			Result:  "error",
+			Result:  "error", //nolint:goconst
 			Message: "event_json is required",
 		})
 		return
@@ -46,7 +46,7 @@ func (h *ingestHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	result, err := h.ingester.IngestEvent(r.Context(), json.RawMessage(req.EventJSON))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, ingestResponse{
-			Result:  "error",
+			Result:  "error", //nolint:goconst
 			Message: err.Error(),
 		})
 		return
@@ -62,4 +62,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v) //nolint:errcheck
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg}) //nolint:goconst
 }

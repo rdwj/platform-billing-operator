@@ -73,3 +73,30 @@ type rawSource struct {
 	Collector        string `json:"collector"`
 	CollectorVersion string `json:"collector_version,omitempty"`
 }
+
+type UsageBucket struct {
+	Start      time.Time          `json:"start"`
+	SKU        string             `json:"sku"`
+	Quantities map[string]float64 `json:"quantities"`
+	Charged    string             `json:"charged"`
+	Events     int                `json:"events"`
+}
+
+type AdjustmentInput struct {
+	TenantID       string `json:"tenant"`
+	Amount         string `json:"amount"`
+	Kind           string `json:"kind"`
+	Reason         string `json:"reason"`
+	Actor          string `json:"actor"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
+
+type AdjustmentRow struct {
+	ID             string    `json:"id"`
+	TenantID       string    `json:"tenant"`
+	Amount         string    `json:"amount"`
+	Kind           string    `json:"kind"`
+	Reason         string    `json:"reason"`
+	IdempotencyKey string    `json:"idempotency_key"`
+	CreatedAt      time.Time `json:"created_at"`
+}

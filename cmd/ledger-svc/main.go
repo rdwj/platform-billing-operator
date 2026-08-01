@@ -61,7 +61,7 @@ func main() {
 	}
 
 	// HTTP server (convenience endpoint for WASM capture filter)
-	httpHandler := httpapi.NewServer(ingester)
+	httpHandler := httpapi.NewServer(ingester, store)
 	httpSrv := &http.Server{
 		Addr:    listenHTTP,
 		Handler: httpHandler,
