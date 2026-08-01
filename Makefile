@@ -116,6 +116,10 @@ test: manifests generate fmt vet setup-envtest ## Run tests.
 test-integration: ## Run integration tests (requires Docker/Podman for testcontainers).
 	TESTCONTAINERS_RYUK_DISABLED=true go test -tags=integration -v -count=1 ./internal/ledger/...
 
+.PHONY: test-integration-gpu
+test-integration-gpu: ## Run GPU collector integration tests
+	TESTCONTAINERS_RYUK_DISABLED=true go test -tags=integration -v -count=1 ./internal/metering/gpu/...
+
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
 # CertManager is installed by default; skip with:
@@ -269,6 +273,10 @@ dev-cluster: ## Create a kind dev cluster with full Kuadrant stack
 .PHONY: setup-postgres
 setup-postgres: ## Deploy Postgres 16 to the dev kind cluster
 	@KUBECTL=$(KUBECTL) hack/setup-postgres.sh $(CLUSTER_CONTEXT)
+
+.PHONY: setup-kueue
+setup-kueue: ## Install Kueue on dev kind cluster with fake GPU nodes
+	@KUBECTL=$(KUBECTL) hack/setup-kueue.sh $(CLUSTER_CONTEXT)
 
 .PHONY: dev-cluster-delete
 dev-cluster-delete: ## Delete the kind dev cluster

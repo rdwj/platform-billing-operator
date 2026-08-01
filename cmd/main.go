@@ -40,6 +40,7 @@ import (
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/controller"
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
+	"github.com/rdwj/platform-billing-operator/internal/metering/gpu"
 	"github.com/rdwj/platform-billing-operator/internal/rater"
 	raterjob "github.com/rdwj/platform-billing-operator/internal/rater/job"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
@@ -48,6 +49,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/metrics/filters"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
+	kueuev1beta1 "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -59,6 +61,7 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(billingv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kueuev1beta1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 }
@@ -274,6 +277,27 @@ func main() {
 		setupLog.Info("ledger-dependent components started", "dsn", "***")
 	} else {
 		setupLog.Info("LEDGER_DSN not set; balance controller and rating job disabled")
+	}
+
+	// --- GPU collector (Kueue Workload watcher) ---
+	if collectorURL := os.Getenv("KUEUE_COLLECTOR_LEDGER_URL"); collectorURL != "" {
+		gpuLog := ctrl.Log.WithName("gpu-collector")
+		gpuSender := gpu.NewHTTPSender(collectorURL)
+		gpuCollector := gpu.NewCollector(mgr.GetClient(), gpuLog, gpu.CollectorConfig{
+			LedgerIngestURL:  collectorURL,
+			IntervalDuration: 1 * time.Hour,
+			CollectorVersion: "0.0.1",
+			DefaultGeo:       os.Getenv("COLLECTOR_DEFAULT_GEO"),
+		}, gpuSender)
+		if err := gpuCollector.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create GPU collector")
+			os.Exit(1)
+		}
+		if err := mgr.Add(manager.RunnableFunc(gpuCollector.StartIntervalTicker)); err != nil {
+			setupLog.Error(err, "unable to add GPU interval ticker")
+			os.Exit(1)
+		}
+		setupLog.Info("GPU collector started", "ledger_url", collectorURL)
 	}
 
 	// +kubebuilder:scaffold:builder
