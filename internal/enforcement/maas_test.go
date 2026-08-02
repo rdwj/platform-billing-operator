@@ -97,7 +97,7 @@ func newTestBackend(t *testing.T) (*MaaSBackend, client.Client) {
 	return NewMaaSBackend(c, s, nil), c
 }
 
-func newTestBackendWithKeys(t *testing.T) (*MaaSBackend, client.Client, *mockKeyManager) {
+func newTestBackendWithKeys(t *testing.T) (*MaaSBackend, *mockKeyManager) {
 	t.Helper()
 	s := testScheme(t)
 	c := fake.NewClientBuilder().
@@ -105,7 +105,7 @@ func newTestBackendWithKeys(t *testing.T) (*MaaSBackend, client.Client, *mockKey
 		WithObjects(testPlan()).
 		Build()
 	km := &mockKeyManager{}
-	return NewMaaSBackend(c, s, km), c, km
+	return NewMaaSBackend(c, s, km), km
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +320,7 @@ func TestThawIsIdempotent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestFreezeDisablesKeys(t *testing.T) {
-	backend, _, km := newTestBackendWithKeys(t)
+	backend, km := newTestBackendWithKeys(t)
 	acct := testTenantAccount()
 	ctx := context.Background()
 
@@ -334,7 +334,7 @@ func TestFreezeDisablesKeys(t *testing.T) {
 }
 
 func TestThawEnablesKeys(t *testing.T) {
-	backend, _, km := newTestBackendWithKeys(t)
+	backend, km := newTestBackendWithKeys(t)
 	acct := testTenantAccount()
 	ctx := context.Background()
 

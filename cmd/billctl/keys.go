@@ -63,13 +63,13 @@ func keysListCmd() *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintf(w, "KEY\tENABLED\tSOURCE\tCREATED\tDISABLED\n")
+			fmt.Fprintf(w, "KEY\tENABLED\tSOURCE\tCREATED\tDISABLED\n") //nolint:errcheck
 			for _, k := range result.Keys {
 				disabled := ""
 				if k.DisabledAt != nil {
 					disabled = *k.DisabledAt
 				}
-				fmt.Fprintf(w, "%s\t%v\t%s\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\t%v\t%s\t%s\t%s\n", //nolint:errcheck
 					k.KeyName, k.Enabled, k.Source, k.CreatedAt, disabled)
 			}
 			w.Flush() //nolint:errcheck
