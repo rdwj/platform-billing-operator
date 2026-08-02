@@ -1,36 +1,41 @@
-# Session Summary: M3 Allowance Enforcement — Phase 3 Kind Run
+# Session Summary — 2026-08-02 · m3-allowance-enforcement · Phase 3 kind run
 
-**Date:** 2026-08-02
-**Epic:** m3-allowance-enforcement
-**Phase:** 3 (Freeze/thaw E2E on kind)
-**Outcome:** Phase 3 DONE — 31/31 tests pass on kind with real Kuadrant v1.5.2 and Postgres.
+**Plan:** NEXT_SESSION-m3-allowance-enforcement.md (Phase 3)   **Commits:** 2cf0371..5ecfada (main)
+**Deployed:** kind-platform-billing-dev   **Model:** Opus 4.6
 
-## What happened
+## Plan vs. actual
+Planned: run `make demo-m3` on kind, debug failures, close Phase 3. Shipped: 31/31 tests pass after fixing 3 script bugs + 1 lint issue. Slipped: none.
+Scope: expanded slightly to fix the same TRUNCATE bug in demo-g0.sh (same root cause, 1-line fix).
 
-Ran `make demo-m3` on the existing kind cluster (`kind-platform-billing-dev`). Three bugs were found and fixed across four demo attempts before all 31 tests passed:
-
-1. **Unbound variable in echo** (`$1.00`, `$2.00`, `$1.04` in double-quoted strings). With `set -u`, `$1`/`$2` are unbound positional params. Fixed by switching to single quotes.
-
-2. **Stale operator image in kind.** The operator pod was 9 hours old, running M2-era code without the M3 enforcement backend. The first demo run's `kind load docker-image` didn't update containerd (image "not yet present" message confirmed on rebuild). Fixed by rebuilding with `podman build`, loading with `kind load`, and deleting the pod.
-
-3. **Append-only triggers prevent DELETE.** Ledger tables (`charges`, `usage_events`, `adjustments`) have `ledger_append_only()` triggers that raise on DELETE. The demo's clean baseline (`DELETE FROM ... || true`) failed silently, leaving stale seeds from previous runs. Fixed by using `TRUNCATE ... CASCADE` which bypasses row-level triggers.
-
-4. **CI errcheck lint failure.** `sender.go:62` had bare `defer resp.Body.Close()`. Fixed with `defer func() { _ = resp.Body.Close() }()`.
-
-## Test results
-
-All three scenarios validated:
-
-- **Test 1 (graceAmount=0):** Active → Warning (balance=$0.20 < threshold=$0.30) → Frozen (balance=-$0.04) → Active (thaw after $2.00 top-up). AuthPolicy deny created on freeze, removed on thaw. TRLP re-applied after thaw.
-- **Test 2 (graceAmount=0.50):** Active → Grace (balance=-$0.04, within $0.50 grace) → Frozen (balance=-$0.52, exceeded grace). No AuthPolicy deny in Grace state.
-- **Test 3 (timing):** Enforcement latency: 29 seconds from balance crossing zero to Frozen state. Well within the 90s bound.
-
-## Commits
-
+## Shipped
 - `2cf0371` fix(m3): demo-m3 kind run fixes — TRUNCATE, echo quoting, errcheck
+- `05a582e` docs: session summary
+- `5ecfada` fix(g0): demo-g0 clean baseline uses TRUNCATE (same as demo-m3 fix)
 
-## Key findings
+## Verification & confidence
+- Live-driven on kind with real Kuadrant v1.5.2 + Postgres 16. 31/31 test assertions pass.
+- All three enforcement states exercised: Warning (balance=$0.20), Grace (balance=-$0.04), Frozen (balance=-$0.52).
+- Thaw on payment works (Frozen → Active after $2.00 top-up).
+- Enforcement latency: 29s (within 90s bound).
+- Confidence: **high** — real CRD reconciliation against real Kuadrant CRs, real Postgres, real rating job.
 
-- **kind image loading is fragile.** `kind load docker-image` with `KIND_EXPERIMENTAL_PROVIDER=podman` doesn't always update the containerd image. The "not yet present" message on the second load confirmed the first load's image was gone (or never stored correctly). Lesson: when debugging kind, always verify the image ID matches (`kubectl get pod -o jsonpath='{.status.containerStatuses[0].imageID}'`).
-- **`kubectl logs -l` can hide lines.** Label-selector log queries showed incomplete output compared to pod-name queries. Use explicit pod name for debugging.
-- **Append-only triggers are invisible.** The `|| true` pattern silently swallows the trigger rejection. Demo scripts should fail loudly on cleanup errors or use TRUNCATE from the start.
+## Judgment calls & deviations
+- Rebuilt operator image manually instead of using `make deploy-dev` after discovering kind load didn't persist. The deploy target patches kustomization.yaml (reverted, not committed).
+- Fixed demo-g0.sh proactively (same bug) even though G0 is DONE. Low risk, same 1-line fix.
+
+## Backlog delta
+Filed: none. Closed: none. Deferred: none.
+
+## Drift & forward-collisions
+- Backward: none.
+- Forward: none.
+
+## For the reviewer
+- Sanity-check: the 29s enforcement latency is with 30s poll interval + ~1s rater tick. Tuning the poll interval to 15s (noted in the session plan as acceptable) would halve it, but wasn't needed.
+- Thin verification: CI is still running for the latest commits (errcheck fix + TRUNCATE fix). Prior CI failure was the errcheck issue, now fixed.
+- Wants guidance: none.
+
+## Risks / watch-fors
+- **kind image loading with podman provider is fragile.** `kind load docker-image` sometimes doesn't persist the image in containerd. Always verify image ID on the running pod after loading.
+- **`kubectl logs -l` can hide log lines.** Use explicit pod name for debugging.
+- **Append-only triggers are invisible with `|| true`.** All demo scripts now use TRUNCATE, but any future demo script should follow the same pattern.
