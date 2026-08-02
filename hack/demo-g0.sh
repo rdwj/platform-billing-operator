@@ -305,11 +305,7 @@ fi
 # ---------- Clean baseline ----------
 echo ""
 echo "--- Clean baseline ---"
-psql_query "DELETE FROM charges WHERE 1=1;" >/dev/null 2>&1 || true
-psql_query "DELETE FROM usage_events WHERE 1=1;" >/dev/null 2>&1 || true
-psql_query "DELETE FROM adjustments WHERE 1=1;" >/dev/null 2>&1 || true
-psql_query "DELETE FROM wallet WHERE 1=1;" >/dev/null 2>&1 || true
-psql_query "DELETE FROM dlq WHERE 1=1;" >/dev/null 2>&1 || true
+psql_query "TRUNCATE charges, usage_events, adjustments, wallet, dlq CASCADE;"
 pass "Ledger tables cleared"
 
 # ---------- Port-forward for billctl ----------
