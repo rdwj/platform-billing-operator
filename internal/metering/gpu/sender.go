@@ -61,7 +61,10 @@ func (s *HTTPSender) Send(ctx context.Context, envelope json.RawMessage) error {
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("reading ingest response: %w", err)
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("ingest returned %d: %s", resp.StatusCode, string(respBody))
