@@ -38,16 +38,18 @@ var authPolicyGVK = schema.GroupVersionKind{Group: "kuadrant.io", Version: "v1",
 type MaaSBackend struct {
 	client   client.Client
 	scheme   *runtime.Scheme
+	keys     KeyManager
 	lastTRLP sync.Map // acct.Name -> last applied token limit (int64)
 }
 
 var _ EnforcementBackend = (*MaaSBackend)(nil)
 
 // NewMaaSBackend returns a MaaSBackend wired to the given client and scheme.
-func NewMaaSBackend(c client.Client, s *runtime.Scheme) *MaaSBackend {
+func NewMaaSBackend(c client.Client, s *runtime.Scheme, keys KeyManager) *MaaSBackend {
 	return &MaaSBackend{
 		client: c,
 		scheme: s,
+		keys:   keys,
 	}
 }
 
@@ -135,14 +137,25 @@ func (m *MaaSBackend) Freeze(ctx context.Context, acct *billingv1alpha1.TenantAc
 	}, existing)
 
 	if apierrors.IsNotFound(err) {
-		return m.client.Create(ctx, desired)
-	}
-	if err != nil {
+		if createErr := m.client.Create(ctx, desired); createErr != nil {
+			return createErr
+		}
+	} else if err != nil {
 		return fmt.Errorf("getting deny AuthPolicy for tenant %s: %w", acct.Name, err)
+	} else {
+		desired.SetResourceVersion(existing.GetResourceVersion())
+		if updateErr := m.client.Update(ctx, desired); updateErr != nil {
+			return updateErr
+		}
 	}
 
-	desired.SetResourceVersion(existing.GetResourceVersion())
-	return m.client.Update(ctx, desired)
+	if m.keys != nil {
+		if keyErr := m.keys.DisableAllKeys(ctx, acct.Name); keyErr != nil {
+			return fmt.Errorf("disabling keys for tenant %s: %w", acct.Name, keyErr)
+		}
+	}
+
+	return nil
 }
 
 // Thaw removes the deny AuthPolicy, restoring the tenant's access. Idempotent:
@@ -156,6 +169,13 @@ func (m *MaaSBackend) Thaw(ctx context.Context, acct *billingv1alpha1.TenantAcco
 	if err := m.client.Delete(ctx, obj); err != nil && !apierrors.IsNotFound(err) {
 		return fmt.Errorf("deleting deny AuthPolicy for tenant %s: %w", acct.Name, err)
 	}
+
+	if m.keys != nil {
+		if keyErr := m.keys.EnableAllKeys(ctx, acct.Name); keyErr != nil {
+			return fmt.Errorf("enabling keys for tenant %s: %w", acct.Name, keyErr)
+		}
+	}
+
 	return nil
 }
 

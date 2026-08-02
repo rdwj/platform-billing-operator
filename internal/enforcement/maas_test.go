@@ -72,6 +72,21 @@ func testTenantAccount() *billingv1alpha1.TenantAccount {
 	}
 }
 
+type mockKeyManager struct {
+	disableCalls []string
+	enableCalls  []string
+}
+
+func (m *mockKeyManager) DisableAllKeys(_ context.Context, tenantID string) error {
+	m.disableCalls = append(m.disableCalls, tenantID)
+	return nil
+}
+
+func (m *mockKeyManager) EnableAllKeys(_ context.Context, tenantID string) error {
+	m.enableCalls = append(m.enableCalls, tenantID)
+	return nil
+}
+
 func newTestBackend(t *testing.T) (*MaaSBackend, client.Client) {
 	t.Helper()
 	s := testScheme(t)
@@ -79,7 +94,18 @@ func newTestBackend(t *testing.T) (*MaaSBackend, client.Client) {
 		WithScheme(s).
 		WithObjects(testPlan()).
 		Build()
-	return NewMaaSBackend(c, s), c
+	return NewMaaSBackend(c, s, nil), c
+}
+
+func newTestBackendWithKeys(t *testing.T) (*MaaSBackend, client.Client, *mockKeyManager) {
+	t.Helper()
+	s := testScheme(t)
+	c := fake.NewClientBuilder().
+		WithScheme(s).
+		WithObjects(testPlan()).
+		Build()
+	km := &mockKeyManager{}
+	return NewMaaSBackend(c, s, km), c, km
 }
 
 // ---------------------------------------------------------------------------
@@ -286,5 +312,42 @@ func TestThawIsIdempotent(t *testing.T) {
 	// Thaw without prior Freeze should be a no-op.
 	if err := backend.Thaw(ctx, acct); err != nil {
 		t.Fatalf("Thaw without prior Freeze: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Key Management Integration
+// ---------------------------------------------------------------------------
+
+func TestFreezeDisablesKeys(t *testing.T) {
+	backend, _, km := newTestBackendWithKeys(t)
+	acct := testTenantAccount()
+	ctx := context.Background()
+
+	if err := backend.Freeze(ctx, acct); err != nil {
+		t.Fatalf("Freeze: %v", err)
+	}
+
+	if len(km.disableCalls) != 1 || km.disableCalls[0] != acct.Name {
+		t.Errorf("expected DisableAllKeys(%q), got %v", acct.Name, km.disableCalls)
+	}
+}
+
+func TestThawEnablesKeys(t *testing.T) {
+	backend, _, km := newTestBackendWithKeys(t)
+	acct := testTenantAccount()
+	ctx := context.Background()
+
+	// First freeze (creates the deny policy).
+	if err := backend.Freeze(ctx, acct); err != nil {
+		t.Fatalf("Freeze: %v", err)
+	}
+
+	if err := backend.Thaw(ctx, acct); err != nil {
+		t.Fatalf("Thaw: %v", err)
+	}
+
+	if len(km.enableCalls) != 1 || km.enableCalls[0] != acct.Name {
+		t.Errorf("expected EnableAllKeys(%q), got %v", acct.Name, km.enableCalls)
 	}
 }

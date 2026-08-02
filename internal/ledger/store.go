@@ -17,6 +17,7 @@ import (
 )
 
 var ErrIdempotencyConflict = errors.New("idempotency key exists with different content")
+var ErrKeyNotFound = errors.New("api key not found")
 
 type Store struct {
 	pool *pgxpool.Pool
@@ -473,6 +474,81 @@ func (s *Store) InsertAdjustment(ctx context.Context, adj AdjustmentInput) (Adju
 		return AdjustmentRow{}, fmt.Errorf("insert adjustment: %w", err)
 	}
 	return row, nil
+}
+
+type Key struct {
+	KeyName    string
+	TenantID   string
+	Enabled    bool
+	Source     string
+	CreatedAt  time.Time
+	DisabledAt *time.Time
+}
+
+func (s *Store) ListKeys(ctx context.Context, tenantID string) ([]Key, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT key_name, tenant_id, enabled, source, created_at, disabled_at
+         FROM api_keys WHERE tenant_id = $1 ORDER BY key_name`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list keys: %w", err)
+	}
+	defer rows.Close()
+	var keys []Key
+	for rows.Next() {
+		var k Key
+		if err := rows.Scan(&k.KeyName, &k.TenantID, &k.Enabled, &k.Source, &k.CreatedAt, &k.DisabledAt); err != nil {
+			return nil, fmt.Errorf("scan key: %w", err)
+		}
+		keys = append(keys, k)
+	}
+	return keys, rows.Err()
+}
+
+func (s *Store) RegisterKey(ctx context.Context, tenantID, keyName, source string) error {
+	_, err := s.pool.Exec(ctx,
+		`INSERT INTO api_keys (tenant_id, key_name, source) VALUES ($1, $2, $3)
+         ON CONFLICT (tenant_id, key_name) DO NOTHING`, tenantID, keyName, source)
+	if err != nil {
+		return fmt.Errorf("register key: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) SetKeyEnabled(ctx context.Context, tenantID, keyName string, enabled bool) error {
+	var disabledAt interface{}
+	if !enabled {
+		disabledAt = time.Now()
+	}
+	tag, err := s.pool.Exec(ctx,
+		`UPDATE api_keys SET enabled = $1, disabled_at = $2 WHERE tenant_id = $3 AND key_name = $4`,
+		enabled, disabledAt, tenantID, keyName)
+	if err != nil {
+		return fmt.Errorf("set key enabled: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("%w: %s for tenant %s", ErrKeyNotFound, keyName, tenantID)
+	}
+	return nil
+}
+
+func (s *Store) DisableAllKeys(ctx context.Context, tenantID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE api_keys SET enabled = false, disabled_at = now() WHERE tenant_id = $1 AND enabled = true`,
+		tenantID)
+	if err != nil {
+		return fmt.Errorf("disable all keys: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) EnableAllKeys(ctx context.Context, tenantID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE api_keys SET enabled = true, disabled_at = NULL WHERE tenant_id = $1 AND enabled = false`,
+		tenantID)
+	if err != nil {
+		return fmt.Errorf("enable all keys: %w", err)
+	}
+	return nil
 }
 
 // Pool exposes the underlying pgxpool for integration tests that need raw SQL access.

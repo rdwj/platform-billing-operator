@@ -250,7 +250,7 @@ func main() {
 			os.Exit(1)
 		}
 
-		enforcementBackend := enforcement.NewMaaSBackend(mgr.GetClient(), mgr.GetScheme())
+		enforcementBackend := enforcement.NewMaaSBackend(mgr.GetClient(), mgr.GetScheme(), store)
 		if err = (&controller.TenantAccountReconciler{
 			Client:      mgr.GetClient(),
 			Scheme:      mgr.GetScheme(),

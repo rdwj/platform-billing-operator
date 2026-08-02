@@ -24,6 +24,13 @@ type EnforcementBackend interface {
 	Thaw(ctx context.Context, acct *billingv1alpha1.TenantAccount) error
 }
 
+// KeyManager abstracts bulk key enable/disable operations used by the
+// enforcement backend during Freeze/Thaw transitions.
+type KeyManager interface {
+	DisableAllKeys(ctx context.Context, tenantID string) error
+	EnableAllKeys(ctx context.Context, tenantID string) error
+}
+
 // NoopBackend is an EnforcementBackend that does nothing. Used for testing the
 // state machine in isolation before the real Kuadrant backend is wired in.
 type NoopBackend struct{}
