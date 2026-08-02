@@ -309,7 +309,7 @@ demo-m2: ## Run M2 demo (rating + wallet + billing-api)
 
 .PHONY: demo-m3
 demo-m3: ## Run M3 demo (allowance loop + wallet drain + freeze)
-	@echo "demo-m3: not yet implemented"
+	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-m3.sh
 
 .PHONY: demo-m4
 demo-m4: ## Run M4 demo (PSP integration)
