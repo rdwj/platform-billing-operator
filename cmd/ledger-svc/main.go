@@ -10,6 +10,13 @@ import (
 	"os/signal"
 	"syscall"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
 	"github.com/rdwj/platform-billing-operator/internal/ledger/grpcapi"
 	"github.com/rdwj/platform-billing-operator/internal/ledger/httpapi"
@@ -60,8 +67,31 @@ func main() {
 		log.Fatalf("listen gRPC on %s: %v", listenGRPC, err)
 	}
 
+	// K8s client for pricing endpoint (PriceBook lookup).
+	scheme := runtime.NewScheme()
+	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
+	utilruntime.Must(billingv1alpha1.AddToScheme(scheme))
+
+	var k8sReader client.Reader
+	cfg, err := ctrl.GetConfig()
+	if err != nil {
+		log.Printf("WARNING: no kubeconfig available, /v1/pricing will return 503: %v", err)
+	} else {
+		k8sClient, clientErr := client.New(cfg, client.Options{Scheme: scheme})
+		if clientErr != nil {
+			log.Printf("WARNING: failed to create K8s client, /v1/pricing will return 503: %v", clientErr)
+		} else {
+			k8sReader = k8sClient
+		}
+	}
+
+	billingNS := os.Getenv("BILLING_NAMESPACE")
+	if billingNS == "" {
+		billingNS = "billing-system"
+	}
+
 	// HTTP server (convenience endpoint for WASM capture filter)
-	httpHandler := httpapi.NewServer(ingester, store)
+	httpHandler := httpapi.NewServer(ingester, store, k8sReader, billingNS)
 	httpSrv := &http.Server{
 		Addr:    listenHTTP,
 		Handler: httpHandler,

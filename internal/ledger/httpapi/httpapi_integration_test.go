@@ -74,7 +74,7 @@ func TestMain(m *testing.M) {
 	}
 
 	testPool = testStore.Pool()
-	handler := httpapi.NewServer(testIngester, testStore)
+	handler := httpapi.NewServer(testIngester, testStore, nil, "default")
 	testServer = httptest.NewServer(handler)
 
 	code := m.Run()
@@ -254,11 +254,11 @@ func TestBalanceReflectsAdjustmentsAndCharges(t *testing.T) {
 	require.Regexp(t, moneyPattern, b["balance"].(string))
 }
 
-func TestPricingNotImplemented(t *testing.T) {
+func TestPricingNoK8sReader(t *testing.T) {
 	resp, err := http.Get(testServer.URL + "/v1/pricing?tenant=any-tenant")
 	require.NoError(t, err)
 	defer resp.Body.Close()
-	require.Equal(t, http.StatusNotImplemented, resp.StatusCode)
+	require.Equal(t, http.StatusServiceUnavailable, resp.StatusCode)
 }
 
 func TestUsageMissingParams(t *testing.T) {
