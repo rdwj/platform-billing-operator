@@ -72,20 +72,23 @@ spec:
                 description: GracePolicy defines behavior when the tenant's balance
                   drops to zero.
                 properties:
-                  action:
-                    description: Action is the enforcement action taken when the grace
-                      window expires.
-                    enum:
-                    - Freeze
-                    - Throttle
+                  graceAmount:
+                    default: "0.000000"
+                    description: |-
+                      GraceAmount is the dollar amount below zero a tenant is allowed before
+                      enforcement fires. "0.000000" means freeze on the very next request after
+                      crossing zero. The request that crossed zero still completes.
+                    pattern: ^\d+(\.\d{1,6})?$
                     type: string
-                  window:
-                    description: Window is the duration below zero before the grace
-                      action fires (e.g. "4h").
+                  warningThreshold:
+                    description: |-
+                      WarningThreshold is the balance level at which a Warning state is entered.
+                      When set and balance drops below this value, the tenant enters Warning state
+                      (advisory only — no enforcement action). Optional.
+                    pattern: ^\d+(\.\d{1,6})?$
                     type: string
                 required:
-                - action
-                - window
+                - graceAmount
                 type: object
               planRef:
                 description: PlanRef references the Plan CR that governs this tenant's
@@ -249,6 +252,7 @@ spec:
                 enum:
                 - Pending
                 - Active
+                - Warning
                 - Grace
                 - Frozen
                 - Suspended

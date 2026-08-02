@@ -24,6 +24,19 @@ import (
 const (
 	ConditionBalanceHealthy     = "BalanceHealthy"
 	ConditionPaymentMethodValid = "PaymentMethodValid"
+	ConditionBalanceStale       = "BalanceStale"
+
+	StatePending   = "Pending"
+	StateActive    = "Active"
+	StateWarning   = "Warning"
+	StateGrace     = "Grace"
+	StateFrozen    = "Frozen"
+	StateSuspended = "Suspended"
+	StateClosed    = "Closed"
+
+	BillingModeShowbackOnly = "ShowbackOnly"
+	BillingModePrepaid      = "Prepaid"
+	BillingModeInvoiced     = "Invoiced"
 )
 
 // ReloadPolicy configures automatic wallet reload for Prepaid tenants.
@@ -50,14 +63,20 @@ type ReloadPolicy struct {
 
 // GracePolicy defines the behavior when a tenant's balance drops to zero.
 type GracePolicy struct {
-	// Window is the duration below zero before the grace action fires (e.g. "4h").
+	// GraceAmount is the dollar amount below zero a tenant is allowed before
+	// enforcement fires. "0.000000" means freeze on the very next request after
+	// crossing zero. The request that crossed zero still completes.
 	// +kubebuilder:validation:Required
-	Window string `json:"window"`
+	// +kubebuilder:validation:Pattern=`^\d+(\.\d{1,6})?$`
+	// +kubebuilder:default="0.000000"
+	GraceAmount string `json:"graceAmount"`
 
-	// Action is the enforcement action taken when the grace window expires.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=Freeze;Throttle
-	Action string `json:"action"`
+	// WarningThreshold is the balance level at which a Warning state is entered.
+	// When set and balance drops below this value, the tenant enters Warning state
+	// (advisory only — no enforcement action). Optional.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^\d+(\.\d{1,6})?$`
+	WarningThreshold string `json:"warningThreshold,omitempty"`
 }
 
 // TenantAccountSpec defines the desired state of a TenantAccount.
@@ -100,7 +119,7 @@ type TenantAccountSpec struct {
 // TenantAccountStatus defines the observed state of a TenantAccount.
 type TenantAccountStatus struct {
 	// State is the current lifecycle state of this TenantAccount.
-	// +kubebuilder:validation:Enum=Pending;Active;Grace;Frozen;Suspended;Closed
+	// +kubebuilder:validation:Enum=Pending;Active;Warning;Grace;Frozen;Suspended;Closed
 	// +optional
 	State string `json:"state,omitempty"`
 

@@ -20,6 +20,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -33,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
+	"github.com/rdwj/platform-billing-operator/internal/enforcement"
 )
 
 var (
@@ -88,9 +90,12 @@ var _ = BeforeSuite(func() {
 
 	testLedger = &stubBalanceQuerier{}
 	err = (&TenantAccountReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Ledger: testLedger,
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		Ledger:           testLedger,
+		Enforcement:      &enforcement.NoopBackend{},
+		RequeueInterval:  200 * time.Millisecond,
+		MinPatchInterval: time.Millisecond,
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 

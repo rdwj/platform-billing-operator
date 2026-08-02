@@ -16,5 +16,5 @@ spec:
     reloadAmount: "25000"
     monthlyCapAmount: "60000"
   gracePolicy:
-    window: 4h
-    action: Freeze
+    graceAmount: "50.000000"
+    warningThreshold: "100.000000"
