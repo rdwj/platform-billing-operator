@@ -1,0 +1,13 @@
+{
+  "schema_version": "usage.v1",
+  "record_id": "wl-full-gpu-001-interval-0001",
+  "occurred_at": "2026-07-29T15:00:00Z",
+  "tenant_id": "ten-helix",
+  "source": { "profile": "gpuaas", "collector": "kueue-collector" },
+  "sku": "h200",
+  "geo": "us-east-1",
+  "quantities": { "gpu_seconds": 3600, "slice_fraction": 1.0 },
+  "status": "ok",
+  "interval": { "start": "2026-07-29T14:00:00Z", "end": "2026-07-29T15:00:00Z", "seq": 1 },
+  "attributes": { "queue": "team-ml-batch", "workload": "train-large-model-7" }
+}

@@ -15,6 +15,13 @@
         },
         "notes": "cached_tokens are billed INSTEAD of prompt_tokens for the cached portion: billable prompt = prompt_tokens - cached_tokens. reasoning_tokens are a detail of completion_tokens and are NOT double-billed here; they are listed to allow a differential rate later (this pricebook rates them identically, so the split is informational)."
       },
+      "h200": {
+        "unit": "gpu_seconds",
+        "components": {
+          "gpu_seconds": { "rate_per_unit": "0.002917" }
+        },
+        "notes": "per-gpu-second rate = $10.50/hr / 3600. Full H200 GPU."
+      },
       "h200-mig-3g.40gb": {
         "unit": "gpu_seconds",
         "components": {
@@ -75,6 +82,18 @@
         },
         "total": "4.500000",
         "notes": "3600 gpu_seconds @ 0.001250 = 4.500000. Same rater, same ledger, different profile — the ADR-0005 property under test."
+      }
+    },
+    {
+      "id": "v1-gpuaas-interval-full-gpu",
+      "event_file": "examples/gpuaas-interval-full-gpu.json",
+      "expected_charge": {
+        "currency": "USD",
+        "components": {
+          "gpu_seconds": { "billable_quantity": 3600, "amount": "10.501200" }
+        },
+        "total": "10.501200",
+        "notes": "3600 gpu_seconds @ 0.002917 = 10.501200. Full H200 GPU rate test."
       }
     }
   ]

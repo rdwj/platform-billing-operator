@@ -289,6 +289,113 @@ func TestBalanceMissingTenant(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
+func TestUnifiedWalletAcrossProfiles(t *testing.T) {
+	ctx := context.Background()
+	tenantID := "ten-unified-wallet-test"
+
+	// 1. Seed the wallet with a 100 USD credit.
+	adjBody := `{"tenant":"ten-unified-wallet-test","amount":"100.000000","kind":"manual_credit","reason":"unified wallet test seed","idempotency_key":"unified-wallet-seed-001"}`
+	resp, err := http.Post(testServer.URL+"/v1/adjustments", "application/json", strings.NewReader(adjBody))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode,
+		"seed adjustment should return 201")
+
+	// 2. Ingest a MaaS event.
+	maasEv := makeEvent(t, map[string]any{
+		"schema_version": "usage.v1",
+		"record_id":      "req-unified-maas-001",
+		"occurred_at":    "2026-08-01T10:00:00Z",
+		"tenant_id":      tenantID,
+		"source":         map[string]any{"profile": "maas", "collector": "test"},
+		"sku":            "llama-3-70b",
+		"quantities":     map[string]any{"prompt_tokens": 1000, "completion_tokens": 500},
+		"status":         "ok",
+	})
+	maasResult, err := testIngester.IngestEvent(ctx, maasEv)
+	require.NoError(t, err)
+	require.Equal(t, ledger.Inserted, maasResult)
+
+	// 3. Insert a MaaS charge: prompt 1000 @ 2.50/M + completion 500 @ 10.00/M = 0.007500.
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO charges (record_id, tenant_id, price_book, price_book_rev,
+			amount, currency, components, rated_at)
+		VALUES ($1, $2, 'pb-standard', 3, 0.007500, 'USD', '[]', $3)
+		ON CONFLICT (record_id) DO NOTHING`,
+		"req-unified-maas-001", tenantID, "2026-08-01T10:00:00Z")
+	require.NoError(t, err)
+
+	// 4. Ingest a GPUaaS event.
+	gpuEv := makeEvent(t, map[string]any{
+		"schema_version": "usage.v1",
+		"record_id":      "wl-unified-gpu-001-interval-0001",
+		"occurred_at":    "2026-08-01T11:00:00Z",
+		"tenant_id":      tenantID,
+		"source":         map[string]any{"profile": "gpuaas", "collector": "kueue-collector"},
+		"sku":            "h200-mig-3g.40gb",
+		"geo":            "us-east-1",
+		"quantities":     map[string]any{"gpu_seconds": 3600, "slice_fraction": 0.375},
+		"status":         "ok",
+		"interval":       map[string]any{"start": "2026-08-01T10:00:00Z", "end": "2026-08-01T11:00:00Z", "seq": 1},
+		"attributes":     map[string]any{"queue": "team-ml-batch", "workload": "test-unified"},
+	})
+	gpuResult, err := testIngester.IngestEvent(ctx, gpuEv)
+	require.NoError(t, err)
+	require.Equal(t, ledger.Inserted, gpuResult)
+
+	// 5. Insert a GPUaaS charge: 3600 gpu_seconds @ 0.001250 = 4.500000.
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO charges (record_id, tenant_id, price_book, price_book_rev,
+			amount, currency, components, rated_at)
+		VALUES ($1, $2, 'pb-standard', 3, 4.500000, 'USD', '[]', $3)
+		ON CONFLICT (record_id) DO NOTHING`,
+		"wl-unified-gpu-001-interval-0001", tenantID, "2026-08-01T11:00:00Z")
+	require.NoError(t, err)
+
+	// 6. Verify unified balance: 100.000000 - 0.007500 - 4.500000 = 95.492500.
+	balResp, err := http.Get(testServer.URL + "/v1/balance?tenant=" + tenantID)
+	require.NoError(t, err)
+	defer balResp.Body.Close()
+	require.Equal(t, http.StatusOK, balResp.StatusCode)
+
+	var balBody map[string]any
+	require.NoError(t, json.NewDecoder(balResp.Body).Decode(&balBody))
+
+	gotBal, err := decimal.NewFromString(balBody["balance"].(string))
+	require.NoError(t, err)
+	wantBal := decimal.RequireFromString("95.492500")
+	require.True(t, wantBal.Equal(gotBal),
+		"unified balance: want 95.492500, got %s", gotBal)
+
+	// 7. Verify SKU-filtered usage returns only the GPUaaS SKU.
+	skuResp, err := http.Get(testServer.URL + "/v1/usage?tenant=" + tenantID +
+		"&from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z&bucket=day&sku=h200-mig-3g.40gb")
+	require.NoError(t, err)
+	defer skuResp.Body.Close()
+	require.Equal(t, http.StatusOK, skuResp.StatusCode)
+
+	var skuBody map[string]any
+	require.NoError(t, json.NewDecoder(skuResp.Body).Decode(&skuBody))
+	skuPoints := skuBody["points"].([]any)
+	require.Len(t, skuPoints, 1, "SKU filter should return exactly 1 point for h200-mig-3g.40gb")
+
+	skuPt := skuPoints[0].(map[string]any)
+	require.Equal(t, "h200-mig-3g.40gb", skuPt["sku"])
+	require.Equal(t, float64(1), skuPt["events"])
+
+	// 8. Verify unfiltered usage returns both SKUs.
+	allResp, err := http.Get(testServer.URL + "/v1/usage?tenant=" + tenantID +
+		"&from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z&bucket=day")
+	require.NoError(t, err)
+	defer allResp.Body.Close()
+	require.Equal(t, http.StatusOK, allResp.StatusCode)
+
+	var allBody map[string]any
+	require.NoError(t, json.NewDecoder(allResp.Body).Decode(&allBody))
+	allPoints := allBody["points"].([]any)
+	require.Len(t, allPoints, 2, "unfiltered usage should return 2 points (one per SKU)")
+}
+
 func findMigrationsDir() string {
 	dir, _ := os.Getwd()
 	for {

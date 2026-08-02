@@ -22,9 +22,9 @@ spec:
         reasoning_tokens: "10.00"   # same as completion → informational split (rater semantics)
         cached_tokens: "0.625"
     - sku: h200-mig-3g.40gb         # GPUaaS profile reuses the same CRD (ADR-0005)
-      unit: per-gpu-hour
+      unit: per-gpu-second
       rates:
-        gpu_seconds: "4.50"         # rater derives per-second: 4.50 / 3600 = 0.001250
+        gpu_seconds: "0.001250"     # $4.50/hr ÷ 3600
   volumeTiers:
     - thresholdTokens: 1000000000
       discountPct: "8"

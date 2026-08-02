@@ -1,0 +1,21 @@
+# GPU-only PriceBook sample — standalone GPU pricing for GPUaaS metering.
+# See also billing_v1alpha1_pricebook.yaml for the mixed MaaS+GPU pb-standard.
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: PriceBook
+metadata:
+  name: pb-gpu
+spec:
+  currency: USD
+  effectiveFrom: "2026-09-01T00:00:00Z"
+  noticeDays: 30
+  skus:
+    - sku: h200
+      unit: per-gpu-second
+      geo: ""
+      rates:
+        gpu_seconds: "0.002917"       # $10.50/hr / 3600
+    - sku: h200-mig-3g.40gb
+      unit: per-gpu-second
+      geo: ""
+      rates:
+        gpu_seconds: "0.001250"       # $4.50/hr / 3600

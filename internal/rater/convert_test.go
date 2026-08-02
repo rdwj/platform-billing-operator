@@ -84,6 +84,33 @@ func TestConvertGPUaaSSKU(t *testing.T) {
 	}
 }
 
+func TestConvertFullGPUSKU(t *testing.T) {
+	spec := v1alpha1.PriceBookSpec{
+		Currency: "USD",
+		SKUs: []v1alpha1.SKU{
+			{
+				SKUName: "h200",
+				Unit:    "per-gpu-second",
+				Rates:   map[string]string{"gpu_seconds": "0.002917"},
+			},
+		},
+	}
+
+	pb, err := PriceBookSpecToRaterPriceBook("pb-gpu", 1, spec)
+	if err != nil {
+		t.Fatalf("convert: %v", err)
+	}
+
+	sku := pb.SKUs["h200"]
+	comp := sku.Components["gpu_seconds"]
+	if comp.RatePerUnit != "0.002917" {
+		t.Errorf("gpu rate_per_unit = %q, want 0.002917", comp.RatePerUnit)
+	}
+	if comp.RatePerMillion != "" {
+		t.Errorf("gpu rate_per_million should be empty, got %q", comp.RatePerMillion)
+	}
+}
+
 func TestConvertPolicyDefaults(t *testing.T) {
 	spec := v1alpha1.PriceBookSpec{
 		Currency: "USD",
@@ -142,6 +169,11 @@ func TestConvertedPriceBookRatesCorrectly(t *testing.T) {
 				Unit:    "per-gpu-second",
 				Rates:   map[string]string{"gpu_seconds": "0.001250"},
 			},
+			{
+				SKUName: "h200",
+				Unit:    "per-gpu-second",
+				Rates:   map[string]string{"gpu_seconds": "0.002917"},
+			},
 		},
 	}
 
@@ -166,6 +198,15 @@ func TestConvertedPriceBookRatesCorrectly(t *testing.T) {
 	}
 	if gpuCh.Total != "4.500000" {
 		t.Errorf("gpu total = %q, want 4.500000", gpuCh.Total)
+	}
+
+	fullGPUEv := loadEvent(t, "examples/gpuaas-interval-full-gpu.json")
+	fullGPUCh, err := Rate(fullGPUEv, pb)
+	if err != nil {
+		t.Fatalf("Rate full GPU: %v", err)
+	}
+	if fullGPUCh.Total != "10.501200" {
+		t.Errorf("full gpu total = %q, want 10.501200", fullGPUCh.Total)
 	}
 }
 
