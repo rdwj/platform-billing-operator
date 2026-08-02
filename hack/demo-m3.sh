@@ -389,11 +389,7 @@ fi
 # ---------- Clean baseline ----------
 echo ""
 echo "--- Clean baseline ---"
-psql_query "DELETE FROM charges WHERE 1=1;" >/dev/null 2>&1 || true
-psql_query "DELETE FROM usage_events WHERE 1=1;" >/dev/null 2>&1 || true
-psql_query "DELETE FROM adjustments WHERE 1=1;" >/dev/null 2>&1 || true
-psql_query "DELETE FROM wallet WHERE 1=1;" >/dev/null 2>&1 || true
-psql_query "DELETE FROM dlq WHERE 1=1;" >/dev/null 2>&1 || true
+psql_query "TRUNCATE charges, usage_events, adjustments, wallet, dlq CASCADE;"
 pass "Ledger tables cleared"
 
 # ---------- Port-forward for billctl ----------
@@ -511,7 +507,7 @@ else
 fi
 
 # Step 1: Seed $1.00.
-echo "  Seeding $1.00..."
+echo '  Seeding $1.00...'
 $BILLCTL adjust $BILLCTL_ARGS \
   --tenant ten-m3-immed \
   --amount 1.000000 \
@@ -600,7 +596,7 @@ else
 fi
 
 # Step 12: Top up $2.00 (thaw).
-echo "  Topping up $2.00 to thaw..."
+echo '  Topping up $2.00 to thaw...'
 $BILLCTL adjust $BILLCTL_ARGS \
   --tenant ten-m3-immed \
   --amount 2.000000 \
@@ -658,7 +654,7 @@ else
 fi
 
 # Seed $1.00.
-echo "  Seeding $1.00..."
+echo '  Seeding $1.00...'
 $BILLCTL adjust $BILLCTL_ARGS \
   --tenant ten-m3-grace \
   --amount 1.000000 \
@@ -675,7 +671,7 @@ fi
 
 # Step 2: Ingest 13 events (cost=$1.04, balance→-$0.040000).
 # |-0.04| = 0.04 < graceAmount 0.50, so should enter Grace (not Frozen).
-echo "  Ingesting 13 events (cost=$1.04)..."
+echo '  Ingesting 13 events (cost=$1.04)...'
 ingest_events ten-m3-grace 13
 
 echo "  Waiting for rating + reconcile..."

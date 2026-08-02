@@ -59,7 +59,7 @@ func (s *HTTPSender) Send(ctx context.Context, envelope json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("POST /v1/ingest: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
