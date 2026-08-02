@@ -20,6 +20,7 @@ func keysCmd() *cobra.Command {
 	}
 
 	cmd.AddCommand(keysListCmd())
+	cmd.AddCommand(keysRegisterCmd())
 	cmd.AddCommand(keysDisableCmd())
 	cmd.AddCommand(keysEnableCmd())
 	return cmd
@@ -78,6 +79,44 @@ func keysListCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&tenant, "tenant", "", "tenant ID (required)")
 	_ = cmd.MarkFlagRequired("tenant")
+	return cmd
+}
+
+func keysRegisterCmd() *cobra.Command {
+	var tenant, key, source string
+
+	cmd := &cobra.Command{
+		Use:   "register",
+		Short: "Register a new API key",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reqBody, _ := json.Marshal(map[string]string{
+				"tenant":   tenant,
+				"key_name": key,
+				"source":   source,
+			})
+
+			resp, err := http.Post(apiURL+"/keys", "application/json", bytes.NewReader(reqBody))
+			if err != nil {
+				return fmt.Errorf("request failed: %w", err)
+			}
+			defer resp.Body.Close() //nolint:errcheck
+
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+				fmt.Fprintf(os.Stderr, "HTTP %d: %s\n", resp.StatusCode, body)
+				os.Exit(1)
+			}
+
+			fmt.Println(string(body))
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVar(&tenant, "tenant", "", "tenant ID (required)")
+	cmd.Flags().StringVar(&key, "key", "", "key name (required)")
+	cmd.Flags().StringVar(&source, "source", "manual", "key source")
+	_ = cmd.MarkFlagRequired("tenant")
+	_ = cmd.MarkFlagRequired("key")
 	return cmd
 }
 

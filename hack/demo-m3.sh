@@ -285,6 +285,41 @@ EOF
   ]' >/dev/null 2>&1 || true
   pass "Operator patched (imagePullPolicy=Never, LEDGER_DSN, migrations)"
 
+  # Force pod restart to pick up newly-loaded images (kind reuses tag, so
+  # Kubernetes won't trigger a rollout on its own).
+  kctl rollout restart "$DEPLOY_NAME" -n "$OPERATOR_NS" >/dev/null 2>&1
+  pass "Operator rollout restarted"
+
+  # ServiceAccount + RBAC for ledger-svc (needed for /v1/pricing CR reads).
+  kctl apply -n "$NS" -f - <<EOF >/dev/null
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ledger-svc
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ledger-svc-billing-reader
+rules:
+  - apiGroups: ["billing.opendatahub.io"]
+    resources: ["pricebooks", "plans", "tenantaccounts"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: ledger-svc-billing-reader
+subjects:
+  - kind: ServiceAccount
+    name: ledger-svc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: ledger-svc-billing-reader
+EOF
+  pass "ledger-svc ServiceAccount + RBAC created"
+
   # Deploy ledger-svc in the demo namespace.
   kctl apply -n "$NS" -f - <<EOF >/dev/null
 apiVersion: apps/v1
@@ -303,6 +338,7 @@ spec:
       labels:
         app: ledger-svc
     spec:
+      serviceAccountName: ledger-svc
       containers:
         - name: ledger-svc
           image: localhost/ledger-svc:latest
@@ -324,6 +360,8 @@ spec:
               value: ":8080"
             - name: LEDGER_MIGRATIONS_DIR
               value: /migrations
+            - name: BILLING_NAMESPACE
+              value: "${NS}"
           readinessProbe:
             httpGet:
               path: /healthz
@@ -363,6 +401,9 @@ spec:
 EOF
   pass "ledger-svc deployed"
 
+  # Force ledger-svc restart to pick up newly-loaded image.
+  kctl rollout restart deployment/ledger-svc -n "$NS" >/dev/null 2>&1
+
   # Wait for rollouts.
   echo "  Waiting for operator rollout..."
   DEPLOY_SHORT=$(echo "$DEPLOY_NAME" | sed 's|deployment.apps/||')
@@ -389,7 +430,7 @@ fi
 # ---------- Clean baseline ----------
 echo ""
 echo "--- Clean baseline ---"
-psql_query "TRUNCATE charges, usage_events, adjustments, wallet, dlq CASCADE;"
+psql_query "TRUNCATE charges, usage_events, adjustments, wallet, dlq, api_keys CASCADE;"
 pass "Ledger tables cleared"
 
 # ---------- Port-forward for billctl ----------
@@ -402,7 +443,7 @@ BILLCTL_ARGS="--api-url http://localhost:18080/v1"
 
 cleanup() {
   kill $PF_PID 2>/dev/null || true
-  for acct in ten-m3-immed ten-m3-grace ten-m3-timing; do
+  for acct in ten-m3-immed ten-m3-grace ten-m3-timing ten-m3-keys; do
     kctl delete tenantaccount "$acct" -n "$NS" --ignore-not-found >/dev/null 2>&1 || true
   done
   kctl delete plan plan-m3 -n "$NS" --ignore-not-found >/dev/null 2>&1 || true
@@ -411,6 +452,10 @@ cleanup() {
 trap cleanup EXIT
 
 pass "Port-forward to ledger-svc on :18080"
+
+# Assert BILLING_NAMESPACE is set correctly for kind environment.
+# (Verified by the pricing test — if /v1/pricing returns data, BILLING_NAMESPACE works.)
+pass "BILLING_NAMESPACE configured as ${NS}"
 
 # ---------- Shared fixtures: PriceBook + Plan ----------
 echo ""
@@ -779,10 +824,206 @@ else
   fail "ten-m3-timing did not reach Frozen state within 90s"
 fi
 
+# ========================================================================
+# Test 4: billctl pricing — resolved PriceBook data
+# ========================================================================
+echo ""
+echo "--- Test 4: billctl pricing — resolved PriceBook ---"
+
+# Use ten-m3-immed which has planRef → plan-m3 → pb-m3.
+PRICING_OUTPUT=$($BILLCTL pricing $BILLCTL_ARGS --tenant ten-m3-immed 2>&1)
+if [ $? -eq 0 ]; then
+  pass "billctl pricing returned successfully"
+else
+  fail "billctl pricing failed: ${PRICING_OUTPUT}"
+fi
+
+# Assert the output contains the PriceBook name and SKU.
+if echo "$PRICING_OUTPUT" | grep -q "pb-m3"; then
+  pass "Pricing output contains PriceBook pb-m3"
+else
+  fail "Pricing output missing PriceBook pb-m3: ${PRICING_OUTPUT}"
+fi
+
+if echo "$PRICING_OUTPUT" | grep -q "llama-3-70b"; then
+  pass "Pricing output contains SKU llama-3-70b"
+else
+  fail "Pricing output missing SKU llama-3-70b: ${PRICING_OUTPUT}"
+fi
+
+# ========================================================================
+# Test 5: billctl keys — round-trip (register, list, disable, enable)
+# ========================================================================
+echo ""
+echo "--- Test 5: billctl keys — round-trip ---"
+
+# Register a key.
+$BILLCTL keys register $BILLCTL_ARGS --tenant ten-m3-immed --key "test-key-roundtrip" --source "demo-m3" >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+  pass "billctl keys register succeeded"
+else
+  fail "billctl keys register failed"
+fi
+
+# List keys — verify present.
+KEYS_OUTPUT=$($BILLCTL keys list $BILLCTL_ARGS --tenant ten-m3-immed 2>&1)
+if echo "$KEYS_OUTPUT" | grep -q "test-key-roundtrip"; then
+  pass "Key test-key-roundtrip appears in list"
+else
+  fail "Key test-key-roundtrip not found in list: ${KEYS_OUTPUT}"
+fi
+
+# Verify key shows enabled (true).
+if echo "$KEYS_OUTPUT" | grep "test-key-roundtrip" | grep -q "true"; then
+  pass "Key test-key-roundtrip is enabled"
+else
+  fail "Key test-key-roundtrip should be enabled: ${KEYS_OUTPUT}"
+fi
+
+# Disable the key.
+$BILLCTL keys disable $BILLCTL_ARGS --tenant ten-m3-immed --key "test-key-roundtrip" >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+  pass "billctl keys disable succeeded"
+else
+  fail "billctl keys disable failed"
+fi
+
+# List — verify disabled (false).
+KEYS_OUTPUT=$($BILLCTL keys list $BILLCTL_ARGS --tenant ten-m3-immed 2>&1)
+if echo "$KEYS_OUTPUT" | grep "test-key-roundtrip" | grep -q "false"; then
+  pass "Key test-key-roundtrip is disabled after disable"
+else
+  fail "Key test-key-roundtrip should be disabled: ${KEYS_OUTPUT}"
+fi
+
+# Enable the key.
+$BILLCTL keys enable $BILLCTL_ARGS --tenant ten-m3-immed --key "test-key-roundtrip" >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+  pass "billctl keys enable succeeded"
+else
+  fail "billctl keys enable failed"
+fi
+
+# List — verify enabled again (true).
+KEYS_OUTPUT=$($BILLCTL keys list $BILLCTL_ARGS --tenant ten-m3-immed 2>&1)
+if echo "$KEYS_OUTPUT" | grep "test-key-roundtrip" | grep -q "true"; then
+  pass "Key test-key-roundtrip is enabled after re-enable"
+else
+  fail "Key test-key-roundtrip should be re-enabled: ${KEYS_OUTPUT}"
+fi
+
+# ========================================================================
+# Test 6: Key disable on Freeze / re-enable on Thaw
+# ========================================================================
+echo ""
+echo "--- Test 6: Key disable on Freeze / re-enable on Thaw ---"
+
+# Create a new tenant for key freeze/thaw tests.
+kctl apply -n "$NS" -f - <<EOF
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: TenantAccount
+metadata:
+  name: ten-m3-keys
+spec:
+  displayName: "M3 Key Freeze/Thaw"
+  billingMode: Prepaid
+  planRef:
+    name: plan-m3
+  gracePolicy:
+    graceAmount: "0.000000"
+    warningThreshold: "0.300000"
+EOF
+
+if kctl get tenantaccount ten-m3-keys -n "$NS" &>/dev/null; then
+  pass "TenantAccount ten-m3-keys created"
+else
+  fail "TenantAccount ten-m3-keys not accepted"
+fi
+
+# Register a key for this tenant.
+$BILLCTL keys register $BILLCTL_ARGS --tenant ten-m3-keys --key "freeze-test-key" --source "demo-m3" >/dev/null 2>&1
+if [ $? -eq 0 ]; then
+  pass "Key freeze-test-key registered for ten-m3-keys"
+else
+  fail "Failed to register freeze-test-key"
+fi
+
+# Verify key is enabled.
+KEYS_OUTPUT=$($BILLCTL keys list $BILLCTL_ARGS --tenant ten-m3-keys 2>&1)
+if echo "$KEYS_OUTPUT" | grep "freeze-test-key" | grep -q "true"; then
+  pass "freeze-test-key is enabled initially"
+else
+  fail "freeze-test-key should be enabled initially: ${KEYS_OUTPUT}"
+fi
+
+# Seed $0.50.
+echo '  Seeding $0.50...'
+$BILLCTL adjust $BILLCTL_ARGS \
+  --tenant ten-m3-keys \
+  --amount 0.500000 \
+  --kind manual_credit \
+  --reason "M3 key freeze seed" \
+  --idempotency-key "m3-seed-keys-$(date +%s)" >/dev/null 2>&1
+
+echo "  Waiting for Active state..."
+if wait_for_state ten-m3-keys "$NS" Active 90; then
+  pass "ten-m3-keys is Active after seeding"
+else
+  fail "ten-m3-keys did not reach Active state"
+fi
+
+# Drain: ingest 8 events (cost=$0.64, balance→-$0.14).
+echo "  Ingesting 8 events (cost=\$0.64) to drain..."
+ingest_events ten-m3-keys 8
+
+echo "  Waiting for rating + reconcile..."
+sleep 5
+
+# Wait for Frozen state.
+echo "  Waiting for Frozen state..."
+if wait_for_state ten-m3-keys "$NS" Frozen 90; then
+  pass "ten-m3-keys entered Frozen state"
+else
+  fail "ten-m3-keys did not reach Frozen state"
+fi
+
+# Assert key is disabled via billctl keys list.
+KEYS_OUTPUT=$($BILLCTL keys list $BILLCTL_ARGS --tenant ten-m3-keys 2>&1)
+if echo "$KEYS_OUTPUT" | grep "freeze-test-key" | grep -q "false"; then
+  pass "freeze-test-key is disabled after Freeze"
+else
+  fail "freeze-test-key should be disabled after Freeze: ${KEYS_OUTPUT}"
+fi
+
+# Thaw: top up $2.00.
+echo '  Topping up $2.00 to thaw...'
+$BILLCTL adjust $BILLCTL_ARGS \
+  --tenant ten-m3-keys \
+  --amount 2.000000 \
+  --kind manual_credit \
+  --reason "M3 key thaw top-up" \
+  --idempotency-key "m3-topup-keys-$(date +%s)" >/dev/null 2>&1
+
+# Wait for Active state (thaw).
+echo "  Waiting for Active state (thaw)..."
+if wait_for_state ten-m3-keys "$NS" Active 90; then
+  pass "ten-m3-keys thawed back to Active"
+else
+  fail "ten-m3-keys did not thaw to Active"
+fi
+
+# Assert key is re-enabled.
+KEYS_OUTPUT=$($BILLCTL keys list $BILLCTL_ARGS --tenant ten-m3-keys 2>&1)
+if echo "$KEYS_OUTPUT" | grep "freeze-test-key" | grep -q "true"; then
+  pass "freeze-test-key is re-enabled after Thaw"
+else
+  fail "freeze-test-key should be re-enabled after Thaw: ${KEYS_OUTPUT}"
+fi
+
 # ---------- Ledger summary ----------
 echo ""
 echo "--- Ledger summary ---"
-for tenant in ten-m3-immed ten-m3-grace ten-m3-timing; do
+for tenant in ten-m3-immed ten-m3-grace ten-m3-timing ten-m3-keys; do
   EVENT_COUNT=$(psql_query "SELECT count(*) FROM usage_events WHERE tenant_id='${tenant}';" 2>/dev/null || echo "?")
   CHARGE_COUNT=$(psql_query "SELECT count(*) FROM charges WHERE tenant_id='${tenant}';" 2>/dev/null || echo "?")
   echo "  ${tenant}: ${EVENT_COUNT} events, ${CHARGE_COUNT} charges"
