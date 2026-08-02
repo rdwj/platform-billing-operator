@@ -3,6 +3,7 @@
 # having `config/default` as kustomization root.
 # It should be run by config/default
 resources:
+- bases/billing.opendatahub.io_billingconnectors.yaml
 - bases/billing.opendatahub.io_plans.yaml
 - bases/billing.opendatahub.io_pricebooks.yaml
 - bases/billing.opendatahub.io_tenantaccounts.yaml
