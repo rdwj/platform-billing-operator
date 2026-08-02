@@ -37,8 +37,12 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 
+	kuadrantv1 "github.com/kuadrant/kuadrant-operator/api/v1"
+	kuadrantv1alpha1 "github.com/kuadrant/kuadrant-operator/api/v1alpha1"
+
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/controller"
+	"github.com/rdwj/platform-billing-operator/internal/enforcement"
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
 	"github.com/rdwj/platform-billing-operator/internal/metering/gpu"
 	"github.com/rdwj/platform-billing-operator/internal/rater"
@@ -61,6 +65,8 @@ var (
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(billingv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kuadrantv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kuadrantv1.AddToScheme(scheme))
 	utilruntime.Must(kueuev1beta1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
@@ -244,10 +250,12 @@ func main() {
 			os.Exit(1)
 		}
 
+		enforcementBackend := enforcement.NewMaaSBackend(mgr.GetClient(), mgr.GetScheme())
 		if err = (&controller.TenantAccountReconciler{
-			Client: mgr.GetClient(),
-			Scheme: mgr.GetScheme(),
-			Ledger: store,
+			Client:      mgr.GetClient(),
+			Scheme:      mgr.GetScheme(),
+			Ledger:      store,
+			Enforcement: enforcementBackend,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "TenantAccount")
 			os.Exit(1)
