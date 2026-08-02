@@ -161,6 +161,11 @@ spec:
           status:
             description: TenantAccountStatus defines the observed state of a TenantAccount.
             properties:
+              allowanceTokens:
+                description: |-
+                  AllowanceTokens is the token allowance computed from balance and pricing,
+                  used for enforcement. Decimal string format.
+                type: string
               balance:
                 description: |-
                   Balance is the current wallet balance as a decimal string, mirrored from

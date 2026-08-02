@@ -142,6 +142,11 @@ type TenantAccountStatus struct {
 	// +optional
 	MtdSpend string `json:"mtdSpend,omitempty"`
 
+	// AllowanceTokens is the token allowance computed from balance and pricing,
+	// used for enforcement. Decimal string format.
+	// +optional
+	AllowanceTokens string `json:"allowanceTokens,omitempty"`
+
 	// Conditions represent the latest available observations of the
 	// TenantAccount's state.
 	// +optional
