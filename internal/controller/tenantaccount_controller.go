@@ -27,6 +27,7 @@ import (
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -36,9 +37,12 @@ import (
 )
 
 const (
-	requeueBalance      = 30 * time.Second
-	minPatchInterval    = 30 * time.Second
-	defaultMaxStaleness = 10 * time.Minute
+	requeueBalance       = 30 * time.Second
+	minPatchInterval     = 30 * time.Second
+	defaultMaxStaleness  = 10 * time.Minute
+	priceBookStateActive = "Active"
+	unitPer1MTokens      = "per-1M-tokens"
+	unitPer1KTokens      = "per-1K-tokens"
 )
 
 // BalanceQuerier abstracts the ledger queries the balance controller needs.
@@ -124,10 +128,21 @@ func (r *TenantAccountReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 
+	// Compute and apply token allowance for enforced billing modes.
+	var allowanceStr string
+	if r.Enforcement != nil && r.shouldApplyAllowance(state, acct.Spec.BillingMode) {
+		if a, err := r.computeAndApplyAllowance(ctx, &acct, balance); err != nil {
+			logger.Error(err, "allowance computation/apply failed")
+		} else {
+			allowanceStr = a
+		}
+	}
+
 	acct.Status.Balance = balance
 	acct.Status.BalanceObservedAt = &observedAt
 	acct.Status.MtdSpend = mtdSpend
 	acct.Status.State = state
+	acct.Status.AllowanceTokens = allowanceStr
 	acct.Status.ObservedGeneration = acct.Generation
 
 	apimeta.SetStatusCondition(&acct.Status.Conditions, metav1.Condition{
@@ -280,6 +295,140 @@ func (r *TenantAccountReconciler) rateLimited(req ctrl.Request) bool {
 	}
 	last := val.(time.Time)
 	return time.Since(last) < interval
+}
+
+func (r *TenantAccountReconciler) shouldApplyAllowance(state, billingMode string) bool {
+	if billingMode == billingv1alpha1.BillingModeShowbackOnly {
+		return false
+	}
+	switch state {
+	case billingv1alpha1.StateActive, billingv1alpha1.StateWarning, billingv1alpha1.StateGrace:
+		return true
+	default:
+		return false
+	}
+}
+
+// computeAndApplyAllowance resolves the tenant's Plan and PriceBook, computes
+// the token allowance, and calls Apply on the enforcement backend. Returns the
+// allowance string for status reporting.
+func (r *TenantAccountReconciler) computeAndApplyAllowance(ctx context.Context, acct *billingv1alpha1.TenantAccount, balance string) (string, error) {
+	// Resolve Plan
+	var plan billingv1alpha1.Plan
+	if err := r.Get(ctx, types.NamespacedName{
+		Name:      acct.Spec.PlanRef.Name,
+		Namespace: acct.Namespace,
+	}, &plan); err != nil {
+		return "", fmt.Errorf("resolving plan %s: %w", acct.Spec.PlanRef.Name, err)
+	}
+
+	// Resolve PriceBook: check tenant pin first, then Plan's ref, then list Active.
+	priceBookName := acct.Spec.PriceBookPin
+	if priceBookName == "" {
+		priceBookName = plan.Spec.PriceBookRef
+	}
+
+	var priceBook billingv1alpha1.PriceBook
+	if priceBookName != "" {
+		if err := r.Get(ctx, types.NamespacedName{
+			Name:      priceBookName,
+			Namespace: acct.Namespace,
+		}, &priceBook); err != nil {
+			return "", fmt.Errorf("resolving pricebook %s: %w", priceBookName, err)
+		}
+	} else {
+		// Find the Active PriceBook in the namespace.
+		var pbList billingv1alpha1.PriceBookList
+		if err := r.List(ctx, &pbList, client.InNamespace(acct.Namespace)); err != nil {
+			return "", fmt.Errorf("listing pricebooks: %w", err)
+		}
+		found := false
+		for i := range pbList.Items {
+			if pbList.Items[i].Status.State == priceBookStateActive {
+				priceBook = pbList.Items[i]
+				found = true
+				break
+			}
+		}
+		if !found {
+			return "", fmt.Errorf("no Active PriceBook found in namespace %s", acct.Namespace)
+		}
+	}
+
+	// Extract price-per-token estimate from the first SKU.
+	priceEstimate, err := extractPriceEstimate(&priceBook)
+	if err != nil {
+		return "", fmt.Errorf("extracting price estimate: %w", err)
+	}
+
+	// Compute allowance.
+	allowance, err := enforcement.ComputeAllowance(balance, priceEstimate, plan.Spec.Limits.TokensPerMinute)
+	if err != nil {
+		return "", fmt.Errorf("computing allowance: %w", err)
+	}
+
+	// Apply to the enforcement backend.
+	if err := r.Enforcement.Apply(ctx, acct, allowance); err != nil {
+		return "", fmt.Errorf("applying allowance: %w", err)
+	}
+
+	return allowance, nil
+}
+
+// extractPriceEstimate computes a blended per-token price from the first SKU's
+// prompt and completion rates. Returns a per-token decimal string.
+func extractPriceEstimate(pb *billingv1alpha1.PriceBook) (string, error) {
+	if len(pb.Spec.SKUs) == 0 {
+		return "", fmt.Errorf("pricebook %s has no SKUs", pb.Name)
+	}
+
+	sku := pb.Spec.SKUs[0]
+	promptRate := sku.Rates["prompt_tokens"]
+	completionRate := sku.Rates["completion_tokens"]
+
+	if promptRate == "" && completionRate == "" {
+		return "", fmt.Errorf("SKU %s has no prompt_tokens or completion_tokens rate", sku.SKUName)
+	}
+
+	// If only one rate is present, use it directly.
+	if promptRate == "" {
+		promptRate = completionRate
+	}
+	if completionRate == "" {
+		completionRate = promptRate
+	}
+
+	// The rates in PriceBook are per-unit (e.g., per-1M-tokens). Normalize
+	// to per-token based on the unit.
+	promptPerToken, err := normalizeRate(promptRate, sku.Unit)
+	if err != nil {
+		return "", fmt.Errorf("normalizing prompt rate: %w", err)
+	}
+	completionPerToken, err := normalizeRate(completionRate, sku.Unit)
+	if err != nil {
+		return "", fmt.Errorf("normalizing completion rate: %w", err)
+	}
+
+	return enforcement.EstimatePricePerToken(promptPerToken, completionPerToken)
+}
+
+// normalizeRate converts a rate from the PriceBook unit to a per-token rate.
+func normalizeRate(rate, unit string) (string, error) {
+	d, err := decimal.NewFromString(rate)
+	if err != nil {
+		return "", fmt.Errorf("invalid rate %q: %w", rate, err)
+	}
+
+	switch unit {
+	case unitPer1MTokens:
+		return d.Div(decimal.NewFromInt(1_000_000)).String(), nil
+	case unitPer1KTokens:
+		return d.Div(decimal.NewFromInt(1_000)).String(), nil
+	case "per-token", "":
+		return d.String(), nil
+	default:
+		return d.String(), nil
+	}
 }
 
 func (r *TenantAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {

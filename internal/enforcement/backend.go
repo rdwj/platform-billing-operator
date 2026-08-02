@@ -11,8 +11,8 @@ import (
 // enforcement mechanisms (e.g., Kuadrant TokenRateLimitPolicy).
 type EnforcementBackend interface {
 	// Apply updates the tenant's rate limits based on the computed allowance.
-	// allowance is a decimal string representing the token budget for the
-	// current enforcement window. No-op until Phase 2 wires this to TRLP.
+	// allowance is a string representing the whole-number token budget for the
+	// current enforcement window.
 	Apply(ctx context.Context, acct *billingv1alpha1.TenantAccount, allowance string) error
 
 	// Freeze denies all requests for the tenant. Called on Active/Grace → Frozen

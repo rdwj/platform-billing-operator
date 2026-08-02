@@ -106,6 +106,109 @@ func clearLedgerError(tenantName string) {
 	setLedgerError(tenantName, nil)
 }
 
+// enforcementCall records a single call to the recording enforcement backend.
+type enforcementCall struct {
+	method    string // "Apply", "Freeze", "Thaw"
+	tenant    string // acct.Name
+	allowance string // for Apply only
+}
+
+// recordingBackend is an EnforcementBackend that records calls for test assertions.
+type recordingBackend struct {
+	mu    sync.Mutex
+	calls []enforcementCall
+}
+
+func (r *recordingBackend) Apply(_ context.Context, acct *billingv1alpha1.TenantAccount, allowance string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, enforcementCall{method: "Apply", tenant: acct.Name, allowance: allowance})
+	return nil
+}
+
+func (r *recordingBackend) Freeze(_ context.Context, acct *billingv1alpha1.TenantAccount) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, enforcementCall{method: "Freeze", tenant: acct.Name})
+	return nil
+}
+
+func (r *recordingBackend) Thaw(_ context.Context, acct *billingv1alpha1.TenantAccount) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, enforcementCall{method: "Thaw", tenant: acct.Name})
+	return nil
+}
+
+func (r *recordingBackend) getCalls() []enforcementCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]enforcementCall, len(r.calls))
+	copy(result, r.calls)
+	return result
+}
+
+func (r *recordingBackend) reset() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = nil
+}
+
+func (r *recordingBackend) callsForTenant(tenant string) []enforcementCall {
+	all := r.getCalls()
+	var result []enforcementCall
+	for _, c := range all {
+		if c.tenant == tenant {
+			result = append(result, c)
+		}
+	}
+	return result
+}
+
+// createEnforcementFixtures creates a Plan and PriceBook in the given namespace
+// for enforcement integration tests. The Plan has TPM=5,000,000 and references
+// the PriceBook. With rates $3.00/$15.00 per 1M tokens, the blended per-token
+// price is $0.000009.
+func createEnforcementFixtures(ctx context.Context, ns string) {
+	plan := &billingv1alpha1.Plan{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-plan",
+			Namespace: ns,
+		},
+		Spec: billingv1alpha1.PlanSpec{
+			Limits: billingv1alpha1.PlanLimits{
+				TokensPerMinute: int64Ptr(5000000),
+			},
+			TargetRef:    testTargetRef(),
+			PriceBookRef: "test-pricebook",
+		},
+	}
+	ExpectWithOffset(1, k8sClient.Create(ctx, plan)).To(Succeed())
+
+	pb := &billingv1alpha1.PriceBook{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pricebook",
+			Namespace: ns,
+		},
+		Spec: billingv1alpha1.PriceBookSpec{
+			Currency:      "USD",
+			EffectiveFrom: metav1.Now(),
+			NoticeDays:    30,
+			SKUs: []billingv1alpha1.SKU{{
+				SKUName: "test-model",
+				Unit:    "per-1M-tokens",
+				Rates: map[string]string{
+					"prompt_tokens":     "3.00",
+					"completion_tokens": "15.00",
+				},
+			}},
+		},
+	}
+	ExpectWithOffset(1, k8sClient.Create(ctx, pb)).To(Succeed())
+	pb.Status.State = "Active"
+	ExpectWithOffset(1, k8sClient.Status().Update(ctx, pb)).To(Succeed())
+}
+
 var _ = Describe("TenantAccountReconciler", func() {
 	Context("ShowbackOnly tenant with non-zero balance", func() {
 		It("should mirror the non-zero balance from ledger into status", func() {
@@ -722,6 +825,292 @@ var _ = Describe("TenantAccountReconciler", func() {
 
 			// Clean up: remove ledger error for other tests
 			clearLedgerError(tenantName)
+		})
+	})
+
+	Context("Enforcement: Prepaid tenant Apply is called with correct allowance", func() {
+		It("should call Apply with clamped allowance and populate AllowanceTokens", func() {
+			ns := createTestNamespace(ctx, "enforce-apply")
+			tenantName := "ten-enforce-apply"
+			createEnforcementFixtures(ctx, ns)
+
+			setBalance(tenantName, "100.000000")
+			testLedger.mu.Lock()
+			if testLedger.spends == nil {
+				testLedger.spends = make(map[string]string)
+			}
+			testLedger.spends[tenantName] = "0"
+			testLedger.mu.Unlock()
+
+			testBackend.reset()
+
+			acct := &billingv1alpha1.TenantAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tenantName,
+					Namespace: ns,
+				},
+				Spec: billingv1alpha1.TenantAccountSpec{
+					DisplayName: "Enforce Apply Co",
+					PlanRef:     corev1.LocalObjectReference{Name: "test-plan"},
+					BillingMode: "Prepaid",
+				},
+			}
+			Expect(k8sClient.Create(ctx, acct)).To(Succeed())
+
+			// Wait for Active state and AllowanceTokens to be populated.
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name: tenantName, Namespace: ns,
+				}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.State).To(Equal("Active"))
+				g.Expect(fetched.Status.AllowanceTokens).To(Equal("5000000"),
+					"Allowance should be clamped to plan TPM (balance/price=11M > TPM=5M)")
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Assert recording backend captured Apply with correct allowance.
+			Eventually(func() bool {
+				for _, c := range testBackend.callsForTenant(tenantName) {
+					if c.method == "Apply" && c.allowance == "5000000" {
+						return true
+					}
+				}
+				return false
+			}, 5*time.Second, 250*time.Millisecond).Should(BeTrue(),
+				"Expected at least one Apply call with allowance 5000000")
+		})
+	})
+
+	Context("Enforcement: Frozen transition calls Freeze", func() {
+		It("should call Freeze when transitioning to Frozen", func() {
+			ns := createTestNamespace(ctx, "enforce-freeze")
+			tenantName := "ten-enforce-freeze"
+			createEnforcementFixtures(ctx, ns)
+
+			setBalance(tenantName, "100.000000")
+			testLedger.mu.Lock()
+			if testLedger.spends == nil {
+				testLedger.spends = make(map[string]string)
+			}
+			testLedger.spends[tenantName] = "0"
+			testLedger.mu.Unlock()
+
+			acct := &billingv1alpha1.TenantAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tenantName,
+					Namespace: ns,
+				},
+				Spec: billingv1alpha1.TenantAccountSpec{
+					DisplayName: "Freeze Co",
+					PlanRef:     corev1.LocalObjectReference{Name: "test-plan"},
+					BillingMode: "Prepaid",
+					GracePolicy: &billingv1alpha1.GracePolicy{
+						GraceAmount: "0.000000",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, acct)).To(Succeed())
+
+			// Wait for Active state.
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name: tenantName, Namespace: ns,
+				}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.State).To(Equal("Active"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Drain balance -> Frozen (graceAmount=0 means zero balance = Frozen).
+			testBackend.reset()
+			setBalance(tenantName, "-100.000000")
+
+			// Wait for Frozen state.
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name: tenantName, Namespace: ns,
+				}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.State).To(Equal("Frozen"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Assert Freeze was called.
+			Eventually(func() bool {
+				for _, c := range testBackend.callsForTenant(tenantName) {
+					if c.method == "Freeze" {
+						return true
+					}
+				}
+				return false
+			}, 5*time.Second, 250*time.Millisecond).Should(BeTrue(),
+				"Expected at least one Freeze call for the tenant")
+		})
+	})
+
+	Context("Enforcement: Thaw transition calls Thaw then Apply", func() {
+		It("should call Thaw and Apply when transitioning from Frozen to Active", func() {
+			ns := createTestNamespace(ctx, "enforce-thaw")
+			tenantName := "ten-enforce-thaw"
+			createEnforcementFixtures(ctx, ns)
+
+			setBalance(tenantName, "100.000000")
+			testLedger.mu.Lock()
+			if testLedger.spends == nil {
+				testLedger.spends = make(map[string]string)
+			}
+			testLedger.spends[tenantName] = "0"
+			testLedger.mu.Unlock()
+
+			acct := &billingv1alpha1.TenantAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tenantName,
+					Namespace: ns,
+				},
+				Spec: billingv1alpha1.TenantAccountSpec{
+					DisplayName: "Thaw Co",
+					PlanRef:     corev1.LocalObjectReference{Name: "test-plan"},
+					BillingMode: "Prepaid",
+					GracePolicy: &billingv1alpha1.GracePolicy{
+						GraceAmount: "0.000000",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, acct)).To(Succeed())
+
+			// Activate.
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name: tenantName, Namespace: ns,
+				}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.State).To(Equal("Active"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Freeze.
+			setBalance(tenantName, "-100.000000")
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name: tenantName, Namespace: ns,
+				}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.State).To(Equal("Frozen"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Top up -> should trigger Thaw then Apply.
+			testBackend.reset()
+			setBalance(tenantName, "200.000000")
+
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name: tenantName, Namespace: ns,
+				}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.State).To(Equal("Active"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Assert both Thaw and Apply were called.
+			Eventually(func(g Gomega) {
+				calls := testBackend.callsForTenant(tenantName)
+				hasThaw := false
+				hasApply := false
+				for _, c := range calls {
+					if c.method == "Thaw" {
+						hasThaw = true
+					}
+					if c.method == "Apply" {
+						hasApply = true
+					}
+				}
+				g.Expect(hasThaw).To(BeTrue(), "Expected Thaw call after unfreezing")
+				g.Expect(hasApply).To(BeTrue(), "Expected Apply call after unfreezing")
+			}, 5*time.Second, 250*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	Context("Enforcement: ShowbackOnly tenant never gets Apply", func() {
+		It("should not call Apply for ShowbackOnly tenants", func() {
+			ns := createTestNamespace(ctx, "enforce-showback")
+			tenantName := "ten-enforce-showback"
+			createEnforcementFixtures(ctx, ns)
+
+			setBalance(tenantName, "100.000000")
+			testLedger.mu.Lock()
+			if testLedger.spends == nil {
+				testLedger.spends = make(map[string]string)
+			}
+			testLedger.spends[tenantName] = "0"
+			testLedger.mu.Unlock()
+
+			testBackend.reset()
+
+			acct := &billingv1alpha1.TenantAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tenantName,
+					Namespace: ns,
+				},
+				Spec: billingv1alpha1.TenantAccountSpec{
+					DisplayName: "ShowbackOnly Co",
+					PlanRef:     corev1.LocalObjectReference{Name: "test-plan"},
+					BillingMode: "ShowbackOnly",
+				},
+			}
+			Expect(k8sClient.Create(ctx, acct)).To(Succeed())
+
+			// Wait for Active state to confirm reconciliation ran.
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name: tenantName, Namespace: ns,
+				}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.State).To(Equal("Active"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Assert no enforcement calls were made for this tenant over a sustained period.
+			Consistently(func() []enforcementCall {
+				return testBackend.callsForTenant(tenantName)
+			}, 2*time.Second, 200*time.Millisecond).Should(BeEmpty(),
+				"ShowbackOnly tenants should never trigger enforcement calls")
+		})
+	})
+
+	Context("Enforcement: Allowance populates status.AllowanceTokens", func() {
+		It("should compute and populate AllowanceTokens from balance and pricing", func() {
+			ns := createTestNamespace(ctx, "enforce-allowance")
+			tenantName := "ten-enforce-allowance"
+			createEnforcementFixtures(ctx, ns)
+
+			// $50 / $0.000009 per token = 5,555,555 tokens, clamped to TPM 5,000,000.
+			setBalance(tenantName, "50.000000")
+			testLedger.mu.Lock()
+			if testLedger.spends == nil {
+				testLedger.spends = make(map[string]string)
+			}
+			testLedger.spends[tenantName] = "0"
+			testLedger.mu.Unlock()
+
+			acct := &billingv1alpha1.TenantAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tenantName,
+					Namespace: ns,
+				},
+				Spec: billingv1alpha1.TenantAccountSpec{
+					DisplayName: "Allowance Co",
+					PlanRef:     corev1.LocalObjectReference{Name: "test-plan"},
+					BillingMode: "Prepaid",
+				},
+			}
+			Expect(k8sClient.Create(ctx, acct)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name: tenantName, Namespace: ns,
+				}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.State).To(Equal("Active"))
+				g.Expect(fetched.Status.AllowanceTokens).NotTo(BeEmpty(),
+					"AllowanceTokens should be populated")
+				g.Expect(fetched.Status.AllowanceTokens).To(Equal("5000000"),
+					"Expected $50 / $0.000009 = 5,555,555 clamped to TPM 5,000,000")
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
 		})
 	})
 })

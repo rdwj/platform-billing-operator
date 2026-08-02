@@ -34,16 +34,16 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
-	"github.com/rdwj/platform-billing-operator/internal/enforcement"
 )
 
 var (
-	ctx        context.Context
-	cancel     context.CancelFunc
-	testEnv    *envtest.Environment
-	cfg        *rest.Config
-	k8sClient  client.Client
-	testLedger *stubBalanceQuerier
+	ctx         context.Context
+	cancel      context.CancelFunc
+	testEnv     *envtest.Environment
+	cfg         *rest.Config
+	k8sClient   client.Client
+	testLedger  *stubBalanceQuerier
+	testBackend *recordingBackend
 )
 
 func TestControllers(t *testing.T) {
@@ -89,11 +89,12 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	testLedger = &stubBalanceQuerier{}
+	testBackend = &recordingBackend{}
 	err = (&TenantAccountReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		Ledger:           testLedger,
-		Enforcement:      &enforcement.NoopBackend{},
+		Enforcement:      testBackend,
 		RequeueInterval:  200 * time.Millisecond,
 		MinPatchInterval: time.Millisecond,
 	}).SetupWithManager(mgr)
