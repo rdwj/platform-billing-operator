@@ -1,0 +1,15 @@
+# Build psp-connector binary
+FROM golang:1.26 AS builder
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd/ cmd/
+COPY api/ api/
+COPY internal/ internal/
+RUN CGO_ENABLED=0 go build -o psp-connector ./cmd/psp-connector/
+
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/psp-connector .
+USER 65532:65532
+ENTRYPOINT ["/psp-connector"]
