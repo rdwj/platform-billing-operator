@@ -233,6 +233,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// --- BillingConnector controller (PSP backend bootstrap) ---
+	pspRegistry := controller.NewBackendRegistry()
+	if err = (&controller.BillingConnectorReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Registry: pspRegistry,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "BillingConnector")
+		os.Exit(1)
+	}
+
 	// --- Ledger-dependent components (balance controller + rating job) ---
 	if dsn := os.Getenv("LEDGER_DSN"); dsn != "" {
 		store, err := ledger.NewStore(context.Background(), dsn)

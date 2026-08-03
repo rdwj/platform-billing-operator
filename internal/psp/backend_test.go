@@ -17,13 +17,22 @@ limitations under the License.
 package psp
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
+
+	stripe "github.com/stripe/stripe-go/v82"
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
+	fakestripe "github.com/rdwj/platform-billing-operator/test/fake-stripe"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -38,7 +47,7 @@ func testTenant() *billingv1alpha1.TenantAccount {
 }
 
 // ---------------------------------------------------------------------------
-// Contract test suite — any PSPBackend implementation must pass these.
+// Contract test suite -- any PSPBackend implementation must pass these.
 // ---------------------------------------------------------------------------
 
 type contractTestCase struct {
@@ -107,7 +116,7 @@ func testVerifyAcceptsValid(t *testing.T, b PSPBackend) {
 }
 
 // ---------------------------------------------------------------------------
-// RecordingBackend — must pass all contract tests
+// RecordingBackend -- must pass all contract tests
 // ---------------------------------------------------------------------------
 
 func TestRecordingBackend_Contract(t *testing.T) {
@@ -215,29 +224,223 @@ func TestRecordingBackend_CustomStatusFunc(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// StripeBackend (stub) — must compile and satisfy the interface, but all
-// methods return ErrNotImplemented.
+// StripeBackend -- contract tests (skipping bare-request webhook verify)
 // ---------------------------------------------------------------------------
 
-func TestStripeBackend_Compiles(t *testing.T) {
-	var _ PSPBackend = (*StripeBackend)(nil)
+func newTestStripeBackend(t *testing.T) (*StripeBackend, *httptest.Server) {
+	t.Helper()
+	mux := fakestripe.NewMux()
+	ts := httptest.NewServer(mux)
+	t.Cleanup(ts.Close)
+
+	backend := NewStripeBackend("sk_test_fake", "whsec_test_fake",
+		WithBackendURL(ts.URL),
+	)
+	return backend, ts
 }
 
-func TestStripeBackend_ReturnsNotImplemented(t *testing.T) {
-	b := &StripeBackend{}
+func TestStripeBackend_Contract(t *testing.T) {
+	backend, _ := newTestStripeBackend(t)
 
-	_, err := b.CreatePaymentIntent(context.Background(), testTenant(), "10.000000")
-	if !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("CreatePaymentIntent: expected ErrNotImplemented, got %v", err)
+	for _, tc := range contractTests {
+		// The bare-request webhook verify test sends an unsigned request;
+		// StripeBackend correctly rejects that. Stripe-specific signature
+		// tests are below.
+		if tc.name == "VerifyWebhookSignature accepts valid request" {
+			continue
+		}
+		t.Run(tc.name, func(t *testing.T) {
+			tc.fn(t, backend)
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Stripe-specific tests: cents conversion, webhook signatures, body restore
+// ---------------------------------------------------------------------------
+
+func TestStripeBackend_CentsConversion(t *testing.T) {
+	cases := []struct {
+		dollars   string
+		wantCents int64
+		wantBack  string
+	}{
+		{"19.99", 1999, "19.990000"},
+		{"0.01", 1, "0.010000"},
+		{"100.00", 10000, "100.000000"},
+		{"0.50", 50, "0.500000"},
+		{"999.999999", 99999, "999.990000"}, // truncation at sub-cent
+	}
+	for _, tc := range cases {
+		t.Run(tc.dollars, func(t *testing.T) {
+			cents, err := dollarsToCents(tc.dollars)
+			if err != nil {
+				t.Fatalf("dollarsToCents(%q): %v", tc.dollars, err)
+			}
+			if cents != tc.wantCents {
+				t.Errorf("dollarsToCents(%q) = %d, want %d", tc.dollars, cents, tc.wantCents)
+			}
+			back := centsToDollars(cents)
+			if back != tc.wantBack {
+				t.Errorf("centsToDollars(%d) = %q, want %q", cents, back, tc.wantBack)
+			}
+		})
+	}
+}
+
+func TestStripeBackend_RoundTrip(t *testing.T) {
+	backend, _ := newTestStripeBackend(t)
+	tenant := testTenant()
+
+	// Create a $19.99 payment.
+	id, err := backend.CreatePaymentIntent(context.Background(), tenant, "19.990000")
+	if err != nil {
+		t.Fatalf("CreatePaymentIntent: %v", err)
 	}
 
-	err = b.VerifyWebhookSignature(httptest.NewRequest(http.MethodPost, "/", nil))
-	if !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("VerifyWebhookSignature: expected ErrNotImplemented, got %v", err)
+	// Verify the amount round-trips through the fake server.
+	status, err := backend.GetPaymentStatus(context.Background(), id)
+	if err != nil {
+		t.Fatalf("GetPaymentStatus: %v", err)
+	}
+	if status.Amount != "19.990000" {
+		t.Errorf("round-trip amount = %q, want %q", status.Amount, "19.990000")
+	}
+	if status.State != PaymentStateSucceeded {
+		t.Errorf("state = %q, want Succeeded", status.State)
+	}
+}
+
+// signWebhookPayload produces a valid Stripe-Signature header for the given
+// body using the stripe-go library's test helper.
+func signWebhookPayload(t *testing.T, body []byte, secret string) string {
+	t.Helper()
+	signed := stripe.GenerateTestSignedPayload(&stripe.UnsignedPayload{
+		Payload: body,
+		Secret:  secret,
+	})
+	return signed.Header
+}
+
+func TestStripeBackend_VerifySignature_Valid(t *testing.T) {
+	backend := NewStripeBackend("sk_test_fake", "whsec_test_secret")
+
+	body := []byte(`{"id":"evt_test","type":"payment_intent.succeeded"}`)
+	header := signWebhookPayload(t, body, "whsec_test_secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("Stripe-Signature", header)
+
+	if err := backend.VerifyWebhookSignature(req); err != nil {
+		t.Fatalf("VerifyWebhookSignature rejected valid signature: %v", err)
+	}
+}
+
+func TestStripeBackend_VerifySignature_Invalid(t *testing.T) {
+	backend := NewStripeBackend("sk_test_fake", "whsec_test_secret")
+
+	body := []byte(`{"id":"evt_test","type":"payment_intent.succeeded"}`)
+	// Sign with a different secret.
+	header := signWebhookPayload(t, body, "whsec_wrong_secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("Stripe-Signature", header)
+
+	err := backend.VerifyWebhookSignature(req)
+	if err == nil {
+		t.Fatal("VerifyWebhookSignature accepted invalid signature")
+	}
+}
+
+func TestStripeBackend_VerifySignature_MissingHeader(t *testing.T) {
+	backend := NewStripeBackend("sk_test_fake", "whsec_test_secret")
+
+	body := []byte(`{"id":"evt_test"}`)
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	// No Stripe-Signature header set.
+
+	err := backend.VerifyWebhookSignature(req)
+	if err == nil {
+		t.Fatal("VerifyWebhookSignature accepted request with no signature header")
+	}
+}
+
+func TestStripeBackend_BodyPreservedAfterVerify(t *testing.T) {
+	backend := NewStripeBackend("sk_test_fake", "whsec_test_secret")
+
+	payload := map[string]any{
+		"id":   "evt_test",
+		"type": "payment_intent.succeeded",
+		"data": map[string]any{"amount": 5000},
+	}
+	body, _ := json.Marshal(payload)
+	header := signWebhookPayload(t, body, "whsec_test_secret")
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("Stripe-Signature", header)
+
+	if err := backend.VerifyWebhookSignature(req); err != nil {
+		t.Fatalf("VerifyWebhookSignature: %v", err)
 	}
 
-	_, err = b.GetPaymentStatus(context.Background(), "intent-1")
-	if !errors.Is(err, ErrNotImplemented) {
-		t.Errorf("GetPaymentStatus: expected ErrNotImplemented, got %v", err)
+	// After verification the body must still be readable.
+	restored, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatalf("reading body after verify: %v", err)
+	}
+	if !bytes.Equal(restored, body) {
+		t.Fatalf("body after verify = %q, want %q", restored, body)
+	}
+
+	// Verify it's valid JSON that can be decoded.
+	var decoded map[string]any
+	if err := json.Unmarshal(restored, &decoded); err != nil {
+		t.Fatalf("JSON decode after verify: %v", err)
+	}
+	if decoded["id"] != "evt_test" {
+		t.Errorf("decoded id = %v, want %q", decoded["id"], "evt_test")
+	}
+}
+
+func TestStripeBackend_VerifySignature_ManualHMAC(t *testing.T) {
+	// Verify the signature mechanism directly (no stripe-go helper on the
+	// signing side) to confirm our understanding of the protocol.
+	secret := "whsec_manual_test"
+	backend := NewStripeBackend("sk_test_fake", secret)
+
+	body := []byte(`{"id":"evt_manual"}`)
+	now := time.Now()
+
+	sig := stripe.ComputeSignature(now, body, secret)
+	header := fmt.Sprintf("t=%d,v1=%s", now.Unix(), hex.EncodeToString(sig))
+
+	req := httptest.NewRequest(http.MethodPost, "/webhook", bytes.NewReader(body))
+	req.Header.Set("Stripe-Signature", header)
+
+	if err := backend.VerifyWebhookSignature(req); err != nil {
+		t.Fatalf("manually signed payload rejected: %v", err)
+	}
+}
+
+func TestStripeBackend_StatusMapping(t *testing.T) {
+	cases := []struct {
+		stripe stripe.PaymentIntentStatus
+		want   PaymentState
+	}{
+		{stripe.PaymentIntentStatusSucceeded, PaymentStateSucceeded},
+		{stripe.PaymentIntentStatusCanceled, PaymentStateFailed},
+		{stripe.PaymentIntentStatusRequiresPaymentMethod, PaymentStateFailed},
+		{stripe.PaymentIntentStatusProcessing, PaymentStatePending},
+		{stripe.PaymentIntentStatusRequiresAction, PaymentStatePending},
+		{stripe.PaymentIntentStatusRequiresConfirmation, PaymentStatePending},
+		{stripe.PaymentIntentStatusRequiresCapture, PaymentStatePending},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.stripe), func(t *testing.T) {
+			got := mapStripeStatus(tc.stripe)
+			if got != tc.want {
+				t.Errorf("mapStripeStatus(%q) = %q, want %q", tc.stripe, got, tc.want)
+			}
+		})
 	}
 }

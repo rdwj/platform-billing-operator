@@ -14,6 +14,7 @@ rules:
   - ""
   resources:
   - nodes
+  - secrets
   verbs:
   - get
   - list
@@ -21,6 +22,7 @@ rules:
 - apiGroups:
   - billing.opendatahub.io
   resources:
+  - billingconnectors
   - plans
   - tenantaccounts
   verbs:
@@ -32,18 +34,19 @@ rules:
 - apiGroups:
   - billing.opendatahub.io
   resources:
-  - plans/finalizers
-  - tenantaccounts/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - billing.opendatahub.io
-  resources:
+  - billingconnectors/status
   - plans/status
   - tenantaccounts/status
   verbs:
   - get
   - patch
+  - update
+- apiGroups:
+  - billing.opendatahub.io
+  resources:
+  - plans/finalizers
+  - tenantaccounts/finalizers
+  verbs:
   - update
 - apiGroups:
   - billing.opendatahub.io

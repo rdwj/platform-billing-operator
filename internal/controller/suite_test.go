@@ -38,14 +38,15 @@ import (
 )
 
 var (
-	ctx         context.Context
-	cancel      context.CancelFunc
-	testEnv     *envtest.Environment
-	cfg         *rest.Config
-	k8sClient   client.Client
-	testLedger  *stubBalanceQuerier
-	testBackend *recordingBackend
-	testPSP     *psp.RecordingBackend
+	ctx          context.Context
+	cancel       context.CancelFunc
+	testEnv      *envtest.Environment
+	cfg          *rest.Config
+	k8sClient    client.Client
+	testLedger   *stubBalanceQuerier
+	testBackend  *recordingBackend
+	testPSP      *psp.RecordingBackend
+	testRegistry *BackendRegistry
 )
 
 func TestControllers(t *testing.T) {
@@ -101,6 +102,14 @@ var _ = BeforeSuite(func() {
 		PSP:              testPSP,
 		RequeueInterval:  200 * time.Millisecond,
 		MinPatchInterval: time.Millisecond,
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
+	testRegistry = NewBackendRegistry()
+	err = (&BillingConnectorReconciler{
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Registry: testRegistry,
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 

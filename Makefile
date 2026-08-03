@@ -343,6 +343,11 @@ money-safety: ## Check for money-safety violations (TODO(money), float-in-money-
 		echo "FAIL: float type used in a money-related path — use shopspring/decimal"; \
 		exit 1; \
 	fi
+	@echo "Checking for Stripe secrets in non-test code..."
+	@if grep -rn 'sk_test_\|sk_live_\|whsec_' --include='*.go' . 2>/dev/null | grep -v '_test\.go' | grep -v 'test/fake-stripe/' 2>/dev/null; then \
+		echo "FAIL: Stripe secret key pattern found in non-test Go source"; \
+		exit 1; \
+	fi
 	@echo "Money safety: OK"
 
 .PHONY: openapi-diff
