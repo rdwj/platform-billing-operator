@@ -371,6 +371,7 @@ var _ = Describe("TenantAccountReconciler", func() {
 					PlanRef:              corev1.LocalObjectReference{Name: "priority"},
 					BillingMode:          "Prepaid",
 					PSPCustomerSecretRef: &corev1.LocalObjectReference{Name: "stripe-secret"},
+					BillingConnectorRef:  &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000",
@@ -1285,9 +1286,10 @@ var _ = Describe("TenantAccountReconciler", func() {
 					Namespace: ns,
 				},
 				Spec: billingv1alpha1.TenantAccountSpec{
-					DisplayName: "Reload Co",
-					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
-					BillingMode: "Prepaid",
+					DisplayName:         "Reload Co",
+					PlanRef:             corev1.LocalObjectReference{Name: "basic"},
+					BillingMode:         "Prepaid",
+					BillingConnectorRef: &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",
@@ -1342,9 +1344,10 @@ var _ = Describe("TenantAccountReconciler", func() {
 					Namespace: ns,
 				},
 				Spec: billingv1alpha1.TenantAccountSpec{
-					DisplayName: "Above Threshold Co",
-					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
-					BillingMode: "Prepaid",
+					DisplayName:         "Above Threshold Co",
+					PlanRef:             corev1.LocalObjectReference{Name: "basic"},
+					BillingMode:         "Prepaid",
+					BillingConnectorRef: &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",
@@ -1390,9 +1393,10 @@ var _ = Describe("TenantAccountReconciler", func() {
 					Namespace: ns,
 				},
 				Spec: billingv1alpha1.TenantAccountSpec{
-					DisplayName: "Frozen Reload Co",
-					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
-					BillingMode: "Prepaid",
+					DisplayName:         "Frozen Reload Co",
+					PlanRef:             corev1.LocalObjectReference{Name: "basic"},
+					BillingMode:         "Prepaid",
+					BillingConnectorRef: &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",
@@ -1501,9 +1505,10 @@ var _ = Describe("TenantAccountReconciler", func() {
 					Namespace: ns,
 				},
 				Spec: billingv1alpha1.TenantAccountSpec{
-					DisplayName: "Fraud Cap Co",
-					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
-					BillingMode: "Prepaid",
+					DisplayName:         "Fraud Cap Co",
+					PlanRef:             corev1.LocalObjectReference{Name: "basic"},
+					BillingMode:         "Prepaid",
+					BillingConnectorRef: &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",
@@ -1551,9 +1556,10 @@ var _ = Describe("TenantAccountReconciler", func() {
 					Namespace: ns,
 				},
 				Spec: billingv1alpha1.TenantAccountSpec{
-					DisplayName: "Fraud Cap Ok Co",
-					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
-					BillingMode: "Prepaid",
+					DisplayName:         "Fraud Cap Ok Co",
+					PlanRef:             corev1.LocalObjectReference{Name: "basic"},
+					BillingMode:         "Prepaid",
+					BillingConnectorRef: &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",
@@ -1598,9 +1604,10 @@ var _ = Describe("TenantAccountReconciler", func() {
 					Namespace: ns,
 				},
 				Spec: billingv1alpha1.TenantAccountSpec{
-					DisplayName: "Fraud Vel Co",
-					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
-					BillingMode: "Prepaid",
+					DisplayName:         "Fraud Vel Co",
+					PlanRef:             corev1.LocalObjectReference{Name: "basic"},
+					BillingMode:         "Prepaid",
+					BillingConnectorRef: &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",
@@ -1648,9 +1655,10 @@ var _ = Describe("TenantAccountReconciler", func() {
 					Namespace: ns,
 				},
 				Spec: billingv1alpha1.TenantAccountSpec{
-					DisplayName: "Fraud Vel Ok Co",
-					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
-					BillingMode: "Prepaid",
+					DisplayName:         "Fraud Vel Ok Co",
+					PlanRef:             corev1.LocalObjectReference{Name: "basic"},
+					BillingMode:         "Prepaid",
+					BillingConnectorRef: &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",
@@ -1693,9 +1701,10 @@ var _ = Describe("TenantAccountReconciler", func() {
 					Namespace: ns,
 				},
 				Spec: billingv1alpha1.TenantAccountSpec{
-					DisplayName: "Fraud Cool Co",
-					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
-					BillingMode: "Prepaid",
+					DisplayName:         "Fraud Cool Co",
+					PlanRef:             corev1.LocalObjectReference{Name: "basic"},
+					BillingMode:         "Prepaid",
+					BillingConnectorRef: &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",
@@ -1759,6 +1768,7 @@ var _ = Describe("TenantAccountReconciler", func() {
 					PlanRef:              corev1.LocalObjectReference{Name: "basic"},
 					BillingMode:          "Prepaid",
 					PSPCustomerSecretRef: &corev1.LocalObjectReference{Name: "stripe-secret"},
+					BillingConnectorRef:  &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",
@@ -1819,9 +1829,10 @@ var _ = Describe("TenantAccountReconciler", func() {
 					Namespace: ns,
 				},
 				Spec: billingv1alpha1.TenantAccountSpec{
-					DisplayName: "Fraud Failcl Co",
-					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
-					BillingMode: "Prepaid",
+					DisplayName:         "Fraud Failcl Co",
+					PlanRef:             corev1.LocalObjectReference{Name: "basic"},
+					BillingMode:         "Prepaid",
+					BillingConnectorRef: &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",
@@ -1875,6 +1886,7 @@ var _ = Describe("TenantAccountReconciler", func() {
 					PlanRef:              corev1.LocalObjectReference{Name: "basic"},
 					BillingMode:          "Prepaid",
 					PSPCustomerSecretRef: &corev1.LocalObjectReference{Name: "stripe-secret-v1"},
+					BillingConnectorRef:  &corev1.LocalObjectReference{Name: "test-connector"},
 					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
 						Enabled:          true,
 						ThresholdAmount:  "5000.000000",

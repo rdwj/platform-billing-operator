@@ -630,6 +630,11 @@ func (in *TenantAccountSpec) DeepCopyInto(out *TenantAccountSpec) {
 		*out = new(v1.LocalObjectReference)
 		**out = **in
 	}
+	if in.BillingConnectorRef != nil {
+		in, out := &in.BillingConnectorRef, &out.BillingConnectorRef
+		*out = new(v1.LocalObjectReference)
+		**out = **in
+	}
 	if in.ReloadPolicy != nil {
 		in, out := &in.ReloadPolicy, &out.ReloadPolicy
 		*out = new(ReloadPolicy)

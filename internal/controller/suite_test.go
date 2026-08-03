@@ -94,18 +94,19 @@ var _ = BeforeSuite(func() {
 	testLedger = &stubBalanceQuerier{}
 	testBackend = &recordingBackend{}
 	testPSP = &psp.RecordingBackend{}
+	testRegistry = NewBackendRegistry()
+	testRegistry.Set("test-connector", testPSP)
 	err = (&TenantAccountReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		Ledger:           testLedger,
 		Enforcement:      testBackend,
-		PSP:              testPSP,
+		PSPRegistry:      testRegistry,
 		RequeueInterval:  200 * time.Millisecond,
 		MinPatchInterval: time.Millisecond,
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
-	testRegistry = NewBackendRegistry()
 	err = (&BillingConnectorReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),

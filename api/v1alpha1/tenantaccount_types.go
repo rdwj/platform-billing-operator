@@ -116,6 +116,11 @@ type TenantAccountSpec struct {
 	// +optional
 	PSPCustomerSecretRef *corev1.LocalObjectReference `json:"pspCustomerSecretRef,omitempty"`
 
+	// BillingConnectorRef references the BillingConnector that provides
+	// payment processing for this tenant. Required for auto-reload.
+	// +optional
+	BillingConnectorRef *corev1.LocalObjectReference `json:"billingConnectorRef,omitempty"`
+
 	// ReloadPolicy configures automatic wallet reload (Prepaid mode only).
 	// +optional
 	ReloadPolicy *ReloadPolicy `json:"reloadPolicy,omitempty"`

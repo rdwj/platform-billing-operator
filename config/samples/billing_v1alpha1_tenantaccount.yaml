@@ -10,6 +10,7 @@ spec:
   planRef: {name: priority}
   billingMode: Prepaid              # v1 also supports ShowbackOnly (first-class, M2)
   pspCustomerSecretRef: {name: helix-stripe}
+  billingConnectorRef: {name: stripe-connector}
   reloadPolicy:
     enabled: true
     thresholdAmount: "5000"

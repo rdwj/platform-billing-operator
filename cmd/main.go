@@ -267,6 +267,7 @@ func main() {
 			Scheme:      mgr.GetScheme(),
 			Ledger:      store,
 			Enforcement: enforcementBackend,
+			PSPRegistry: pspRegistry,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "TenantAccount")
 			os.Exit(1)

@@ -34,7 +34,6 @@ import (
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/enforcement"
-	"github.com/rdwj/platform-billing-operator/internal/psp"
 )
 
 const (
@@ -63,7 +62,7 @@ type TenantAccountReconciler struct {
 	Scheme           *runtime.Scheme
 	Ledger           BalanceQuerier
 	Enforcement      enforcement.EnforcementBackend
-	PSP              psp.PSPBackend
+	PSPRegistry      *BackendRegistry
 	RequeueInterval  time.Duration
 	MinPatchInterval time.Duration
 	lastPatch        sync.Map
@@ -463,7 +462,16 @@ func normalizeRate(rate, unit string) (string, error) {
 // the reload threshold. Skips if no PSP backend, no reload policy, already
 // has a pending intent (idempotency), or tenant is Frozen.
 func (r *TenantAccountReconciler) maybeReload(ctx context.Context, acct *billingv1alpha1.TenantAccount, balance, state string) {
-	if r.PSP == nil {
+	if r.PSPRegistry == nil {
+		return
+	}
+	if acct.Spec.BillingConnectorRef == nil {
+		return
+	}
+	backend, ok := r.PSPRegistry.Get(acct.Spec.BillingConnectorRef.Name)
+	if !ok {
+		log.FromContext(ctx).Info("BillingConnector not found in registry",
+			"connector", acct.Spec.BillingConnectorRef.Name)
 		return
 	}
 	if acct.Spec.BillingMode == billingv1alpha1.BillingModeShowbackOnly {
@@ -550,7 +558,7 @@ func (r *TenantAccountReconciler) maybeReload(ctx context.Context, acct *billing
 		}
 	}
 
-	intentID, err := r.PSP.CreatePaymentIntent(ctx, acct, acct.Spec.ReloadPolicy.ReloadAmount)
+	intentID, err := backend.CreatePaymentIntent(ctx, acct, acct.Spec.ReloadPolicy.ReloadAmount)
 	if err != nil {
 		logger.Error(err, "creating reload payment intent")
 		return
