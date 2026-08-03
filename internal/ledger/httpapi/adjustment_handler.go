@@ -60,7 +60,7 @@ func (h *adjustmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch req.Kind {
-	case "manual_credit", "manual_debit", "balance_carry_in", "writeoff", "unmetered_gap":
+	case "manual_credit", "manual_debit", "balance_carry_in", "writeoff", "unmetered_gap", "payment_credit":
 	default:
 		writeError(w, http.StatusBadRequest,
 			"kind must be one of: manual_credit, manual_debit, balance_carry_in, writeoff, unmetered_gap")

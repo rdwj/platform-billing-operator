@@ -22,9 +22,11 @@ import (
 )
 
 const (
-	ConditionBalanceHealthy     = "BalanceHealthy"
-	ConditionPaymentMethodValid = "PaymentMethodValid"
-	ConditionBalanceStale       = "BalanceStale"
+	ConditionBalanceHealthy             = "BalanceHealthy"
+	ConditionPaymentMethodValid         = "PaymentMethodValid"
+	ConditionBalanceStale               = "BalanceStale"
+	ConditionPaymentCorroborationFailed = "PaymentCorroborationFailed"
+	ConditionPaymentDisputed            = "PaymentDisputed"
 
 	StatePending   = "Pending"
 	StateActive    = "Active"
