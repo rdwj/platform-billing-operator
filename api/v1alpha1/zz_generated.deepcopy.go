@@ -659,6 +659,10 @@ func (in *TenantAccountStatus) DeepCopyInto(out *TenantAccountStatus) {
 		in, out := &in.BalanceObservedAt, &out.BalanceObservedAt
 		*out = (*in).DeepCopy()
 	}
+	if in.PaymentMethodChangedAt != nil {
+		in, out := &in.PaymentMethodChangedAt, &out.PaymentMethodChangedAt
+		*out = (*in).DeepCopy()
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))

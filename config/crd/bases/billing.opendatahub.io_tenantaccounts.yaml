@@ -133,6 +133,13 @@ spec:
                   enabled:
                     description: Enabled controls whether automatic reload is active.
                     type: boolean
+                  maxReloadsPerDay:
+                    description: |-
+                      MaxReloadsPerDay is the maximum number of reload attempts allowed in a
+                      rolling 24-hour window. 0 means no limit.
+                    format: int32
+                    minimum: 0
+                    type: integer
                   monthlyCapAmount:
                     description: MonthlyCapAmount is the maximum reload spend per
                       calendar month.
@@ -245,6 +252,11 @@ spec:
                   event-gated Dunning → Frozen escalation (M=3). Reset on success.
                 format: int32
                 type: integer
+              lastPSPCustomerSecretRef:
+                description: |-
+                  LastPSPCustomerSecretRef is the name of the last-observed
+                  PSPCustomerSecretRef, used to detect payment method changes.
+                type: string
               mtdSpend:
                 description: MtdSpend is the month-to-date spend as a decimal string.
                 type: string
@@ -253,6 +265,12 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              paymentMethodChangedAt:
+                description: |-
+                  PaymentMethodChangedAt records when the tenant's payment method
+                  (PSPCustomerSecretRef) was last changed. Used for cooldown enforcement.
+                format: date-time
+                type: string
               pendingReloadIntentID:
                 description: |-
                   PendingReloadIntentID is the PSP intent ID of an in-flight reload

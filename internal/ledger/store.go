@@ -476,6 +476,38 @@ func (s *Store) InsertAdjustment(ctx context.Context, adj AdjustmentInput) (Adju
 	return row, nil
 }
 
+// QueryAdjustmentTotal returns the sum of adjustment amounts for a tenant
+// filtered by kind and time range. Returns "0" if no rows match.
+func (s *Store) QueryAdjustmentTotal(ctx context.Context, tenantID, kind string, since time.Time) (string, error) {
+	var total string
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(sum(amount), 0)
+		FROM adjustments
+		WHERE tenant_id = $1 AND kind = $2 AND created_at >= $3`,
+		tenantID, kind, since,
+	).Scan(&total)
+	if err != nil {
+		return "", fmt.Errorf("query adjustment total: %w", err)
+	}
+	return total, nil
+}
+
+// QueryAdjustmentCount returns the count of adjustments for a tenant
+// filtered by kind and time range.
+func (s *Store) QueryAdjustmentCount(ctx context.Context, tenantID, kind string, since time.Time) (int64, error) {
+	var count int64
+	err := s.pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM adjustments
+		WHERE tenant_id = $1 AND kind = $2 AND created_at >= $3`,
+		tenantID, kind, since,
+	).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("query adjustment count: %w", err)
+	}
+	return count, nil
+}
+
 type Key struct {
 	KeyName    string
 	TenantID   string

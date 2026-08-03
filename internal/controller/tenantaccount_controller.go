@@ -51,6 +51,8 @@ type BalanceQuerier interface {
 	QueryTenantBalance(ctx context.Context, tenantID string) (string, time.Time, error)
 	QueryMTDSpend(ctx context.Context, tenantID string) (string, error)
 	UpdateWallet(ctx context.Context, tenantID, balance string, asOf time.Time) error
+	QueryAdjustmentTotal(ctx context.Context, tenantID, kind string, since time.Time) (string, error)
+	QueryAdjustmentCount(ctx context.Context, tenantID, kind string, since time.Time) (int64, error)
 }
 
 // TenantAccountReconciler reconciles TenantAccount CRs by querying the ledger
@@ -138,6 +140,20 @@ func (r *TenantAccountReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		} else {
 			allowanceStr = a
 		}
+	}
+
+	// Detect payment method changes for cooldown enforcement.
+	currentSecretRef := ""
+	if acct.Spec.PSPCustomerSecretRef != nil {
+		currentSecretRef = acct.Spec.PSPCustomerSecretRef.Name
+	}
+	if currentSecretRef != acct.Status.LastPSPCustomerSecretRef {
+		if acct.Status.LastPSPCustomerSecretRef != "" {
+			// Only set cooldown if there was a previous ref (not initial setup)
+			changeTime := metav1.Now()
+			acct.Status.PaymentMethodChangedAt = &changeTime
+		}
+		acct.Status.LastPSPCustomerSecretRef = currentSecretRef
 	}
 
 	r.maybeReload(ctx, &acct, balance, state)
@@ -478,6 +494,62 @@ func (r *TenantAccountReconciler) maybeReload(ctx context.Context, acct *billing
 	}
 
 	logger := log.FromContext(ctx)
+
+	// Guard 1: MonthlyCapAmount enforcement
+	reloadAmt, err := decimal.NewFromString(acct.Spec.ReloadPolicy.ReloadAmount)
+	if err != nil {
+		return
+	}
+	capAmt, err := decimal.NewFromString(acct.Spec.ReloadPolicy.MonthlyCapAmount)
+	if err != nil {
+		return
+	}
+	now := time.Now().UTC()
+	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	monthlyTotalStr, err := r.Ledger.QueryAdjustmentTotal(ctx, acct.Name, "payment_credit", monthStart)
+	if err != nil {
+		logger.Error(err, "monthly cap query failed, rejecting reload (fail-closed)")
+		return
+	}
+	monthlyTotal, err := decimal.NewFromString(monthlyTotalStr)
+	if err != nil {
+		logger.Error(err, "parsing monthly total")
+		return
+	}
+	if monthlyTotal.Add(reloadAmt).GreaterThan(capAmt) {
+		logger.Info("reload rejected: monthly cap would be exceeded",
+			"monthlyTotal", monthlyTotal.StringFixed(6),
+			"reloadAmount", reloadAmt.StringFixed(6),
+			"monthlyCap", capAmt.StringFixed(6))
+		return
+	}
+
+	// Guard 2: 24-hour reload velocity limit
+	if acct.Spec.ReloadPolicy.MaxReloadsPerDay > 0 {
+		count, err := r.Ledger.QueryAdjustmentCount(ctx, acct.Name, "payment_credit", now.Add(-24*time.Hour))
+		if err != nil {
+			logger.Error(err, "velocity limit query failed, rejecting reload (fail-closed)")
+			return
+		}
+		if count >= int64(acct.Spec.ReloadPolicy.MaxReloadsPerDay) {
+			logger.Info("reload rejected: 24h velocity limit reached",
+				"reloadsInWindow", count,
+				"maxReloadsPerDay", acct.Spec.ReloadPolicy.MaxReloadsPerDay)
+			return
+		}
+	}
+
+	// Guard 3: Payment method cooldown
+	if acct.Status.PaymentMethodChangedAt != nil {
+		cooldown := 24 * time.Hour
+		if now.Sub(acct.Status.PaymentMethodChangedAt.Time) < cooldown {
+			logger.Info("reload rejected: payment method cooldown active",
+				"changedAt", acct.Status.PaymentMethodChangedAt.Time,
+				"cooldownRemaining", cooldown-now.Sub(acct.Status.PaymentMethodChangedAt.Time))
+			return
+		}
+	}
+
 	intentID, err := r.PSP.CreatePaymentIntent(ctx, acct, acct.Spec.ReloadPolicy.ReloadAmount)
 	if err != nil {
 		logger.Error(err, "creating reload payment intent")

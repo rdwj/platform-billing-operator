@@ -84,18 +84,18 @@ func (s *Server) StoreIntent(pi PaymentIntent) {
 func (s *Server) handleCreatePaymentIntent(w http.ResponseWriter, r *http.Request) {
 	// stripe-go sends application/x-www-form-urlencoded
 	if err := r.ParseForm(); err != nil {
-		writeError(w,"invalid form body")
+		writeError(w, "invalid form body")
 		return
 	}
 
 	amountStr := r.FormValue("amount")
 	if amountStr == "" {
-		writeError(w,"missing required param: amount")
+		writeError(w, "missing required param: amount")
 		return
 	}
 	amount, err := strconv.ParseInt(amountStr, 10, 64)
 	if err != nil {
-		writeError(w,"invalid amount: "+amountStr)
+		writeError(w, "invalid amount: "+amountStr)
 		return
 	}
 
@@ -132,7 +132,7 @@ func (s *Server) handleCreatePaymentIntent(w http.ResponseWriter, r *http.Reques
 func (s *Server) handleGetPaymentIntent(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
-		writeError(w,"missing payment intent ID")
+		writeError(w, "missing payment intent ID")
 		return
 	}
 

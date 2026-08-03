@@ -62,6 +62,12 @@ type ReloadPolicy struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^\d+(\.\d{1,6})?$`
 	MonthlyCapAmount string `json:"monthlyCapAmount"`
+
+	// MaxReloadsPerDay is the maximum number of reload attempts allowed in a
+	// rolling 24-hour window. 0 means no limit.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MaxReloadsPerDay int32 `json:"maxReloadsPerDay,omitempty"`
 }
 
 // GracePolicy defines the behavior when a tenant's balance drops to zero.
@@ -159,6 +165,16 @@ type TenantAccountStatus struct {
 	// payment. Prevents duplicate PaymentIntent creation.
 	// +optional
 	PendingReloadIntentID string `json:"pendingReloadIntentID,omitempty"`
+
+	// PaymentMethodChangedAt records when the tenant's payment method
+	// (PSPCustomerSecretRef) was last changed. Used for cooldown enforcement.
+	// +optional
+	PaymentMethodChangedAt *metav1.Time `json:"paymentMethodChangedAt,omitempty"`
+
+	// LastPSPCustomerSecretRef is the name of the last-observed
+	// PSPCustomerSecretRef, used to detect payment method changes.
+	// +optional
+	LastPSPCustomerSecretRef string `json:"lastPSPCustomerSecretRef,omitempty"`
 
 	// Conditions represent the latest available observations of the
 	// TenantAccount's state.
