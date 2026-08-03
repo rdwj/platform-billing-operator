@@ -227,20 +227,19 @@ func TestRecordingBackend_CustomStatusFunc(t *testing.T) {
 // StripeBackend -- contract tests (skipping bare-request webhook verify)
 // ---------------------------------------------------------------------------
 
-func newTestStripeBackend(t *testing.T) (*StripeBackend, *httptest.Server) {
+func newTestStripeBackend(t *testing.T) *StripeBackend {
 	t.Helper()
 	mux := fakestripe.NewMux()
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 
-	backend := NewStripeBackend("sk_test_fake", "whsec_test_fake",
+	return NewStripeBackend("sk_test_fake", "whsec_test_fake",
 		WithBackendURL(ts.URL),
 	)
-	return backend, ts
 }
 
 func TestStripeBackend_Contract(t *testing.T) {
-	backend, _ := newTestStripeBackend(t)
+	backend := newTestStripeBackend(t)
 
 	for _, tc := range contractTests {
 		// The bare-request webhook verify test sends an unsigned request;
@@ -289,7 +288,7 @@ func TestStripeBackend_CentsConversion(t *testing.T) {
 }
 
 func TestStripeBackend_RoundTrip(t *testing.T) {
-	backend, _ := newTestStripeBackend(t)
+	backend := newTestStripeBackend(t)
 	tenant := testTenant()
 
 	// Create a $19.99 payment.

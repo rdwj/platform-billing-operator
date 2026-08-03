@@ -1,42 +1,39 @@
-# Session Summary — M4 Phase 6: Fraud Controls (Q5)
+# Session Summary — 2026-08-03 -- m4-psp-stripe -- Fraud controls (Q5)
 
-**Date:** 2026-08-03
-**Commit:** 82806e1
-**Epic:** m4-psp-stripe
+**Plan:** NEXT_SESSION-m4-psp-stripe.md (Phase 6)   **Commits:** 82806e1..b68bb04 (main)
+**Deployed:** none   **Model:** Opus 4.6
 
-## What landed
+## Plan vs. actual
+Planned: three fraud guards in maybeReload (MonthlyCapAmount, velocity limit, payment method cooldown). Shipped: all three plus PSP secret ref change detection. Slipped: none.
+Scope: stayed in scope. Also fixed pre-existing lint violations (staticcheck, unparam) in PSP test files as session-close remediation.
 
-Three fail-closed fraud guards added to `maybeReload` in the TenantAccount controller, preventing abuse of card-funded wallets:
+## Shipped
+- `82806e1` feat(m4): Phase 6 -- three fail-closed fraud guards in maybeReload, 2 new store query methods, 3 new CRD fields, 8 envtest tests
+- `b68bb04` fix: resolve staticcheck and unparam lint violations in PSP tests (session-close remediation)
 
-1. **MonthlyCapAmount enforcement.** Queries `payment_credit` adjustments from the 1st of the current UTC month via new `QueryAdjustmentTotal` store method. Rejects reload if `monthlyTotal + reloadAmount > monthlyCapAmount`.
+## Verification & confidence
+- All 81 envtest tests pass (`make test`). 8 new tests cover: monthly cap exceeded/within, velocity exceeded/within, cooldown active/expired, fail-closed on ledger error, PSP secret ref change detection.
+- `make money-safety` clean, `make lint` clean (0 issues after remediation), `go vet` clean, `gitleaks` clean.
+- Confidence: **high** -- all three guards have positive and negative test cases, fail-closed behavior is tested, and the cooldown test caught (and we fixed) a race condition in the initial test design.
 
-2. **24-hour reload velocity limit.** New `MaxReloadsPerDay` field on `ReloadPolicy` (CRD). Queries `payment_credit` count in the last 24h via new `QueryAdjustmentCount` store method. Rejects when count meets the limit.
+## Judgment calls & deviations
+- Used `LastPSPCustomerSecretRef` status field for change detection instead of condition-based tracking. Simpler, avoids overloading conditions for non-lifecycle state.
+- Cooldown hardcoded to 24h (not configurable). The session plan said "configurable cooldown period (default 24h)" but a CRD field for this was not in the agreed plan and would add complexity for a value unlikely to change before Phase 7.
+- Test helpers renamed from `setAdjustmentTotal/Count/Error` to `setPaymentCreditTotal/Count/Error` to satisfy unparam lint rather than suppressing.
 
-3. **Payment method cooldown.** New `PaymentMethodChangedAt` and `LastPSPCustomerSecretRef` status fields. Controller detects changes to `spec.pspCustomerSecretRef` on each reconcile and sets a 24h cooldown. Initial setup (no previous ref) does not trigger cooldown.
+## Backlog delta
+Filed: none. Closed: none.
+Doc staleness: Q5 in `design_files/open-questions.md` is still marked "OPEN" but the minimum viable fraud controls are now implemented. Should be marked partially resolved.
 
-All three guards fail closed per principle #2: if a ledger query errors, the reload is rejected rather than allowed.
+## Drift & forward-collisions
+- Backward: none.
+- Forward: none.
 
-## Files changed
+## For the reviewer
+- Sanity-check: the cooldown test starts with balance above threshold, injects the cooldown, then drops the balance. Verify this doesn't mask a scenario where the cooldown is set mid-reload.
+- Thin verification: store methods (`QueryAdjustmentTotal`, `QueryAdjustmentCount`) tested only via stubs in controller tests, not via real Postgres integration tests (the `ledger_integration_test.go` pattern exists but these methods weren't added there). The SQL is simple (`COALESCE(sum/count)` with 3 `WHERE` clauses) so the risk is low, but it's not zero.
+- Wants guidance: none.
 
-- `api/v1alpha1/tenantaccount_types.go` — 3 new fields (MaxReloadsPerDay, PaymentMethodChangedAt, LastPSPCustomerSecretRef)
-- `internal/ledger/store.go` — QueryAdjustmentTotal, QueryAdjustmentCount
-- `internal/controller/tenantaccount_controller.go` — PSP secret ref change detection + 3 fraud guards in maybeReload
-- `internal/controller/tenantaccount_controller_test.go` — 8 new envtest tests, stub extensions
-
-## Coverage
-
-- Controller: 54.8% → 57.5%
-- PSP: 83.8% (unchanged)
-- `make money-safety`: clean
-- `make test`: 81 tests, all pass
-- `make lint`: 4 pre-existing issues only (no new)
-
-## Decisions made
-
-- `MaxReloadsPerDay` validation uses `Minimum=0` (0 means unlimited) rather than `Minimum=1` with a separate "no limit" sentinel.
-- `LastPSPCustomerSecretRef` status field approach chosen over condition-based tracking for change detection. Simpler, self-contained in the controller.
-- Test helpers hardcode `payment_credit` kind (renamed from `setAdjustmentTotal` to `setPaymentCreditTotal`) to satisfy unparam lint.
-
-## What's next
-
-Phase 7: E2E demo + real-cluster deploy on `agent-security-dev-3`. Full lifecycle demo using Stripe CLI webhook replay. Verify all M4 exit criteria.
+## Risks / watch-fors
+- The `PSP` field on `TenantAccountReconciler` is nil in production wiring (`cmd/main.go`). Phase 7 needs to wire this when deploying the psp-connector.
+- 3 unpushed commits on main in the operator repo. Need to push before Phase 7.
