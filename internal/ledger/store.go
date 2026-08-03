@@ -604,6 +604,84 @@ func (s *Store) Pool() *pgxpool.Pool {
 	return s.pool
 }
 
+func (s *Store) QueryTenantTokens(ctx context.Context, tenantID string, from, to time.Time) (int64, error) {
+	var total int64
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(sum(prompt_tokens), 0)
+		FROM usage_events
+		WHERE tenant_id = $1 AND event_ts >= $2 AND event_ts < $3`,
+		tenantID, from, to,
+	).Scan(&total)
+	if err != nil {
+		return 0, fmt.Errorf("query tenant tokens: %w", err)
+	}
+	return total, nil
+}
+
+func (s *Store) InsertDriftReport(ctx context.Context, r DriftReport) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO drift_reports (tenant_id, window_start, window_end, ledger_tokens, prom_tokens,
+			drift_pct, tolerance_pct, exceeded, signature)
+		VALUES ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8, $9)`,
+		r.TenantID, r.WindowStart, r.WindowEnd, r.LedgerTokens, r.PromTokens,
+		r.DriftPct, r.TolerancePct, r.Exceeded, r.Signature,
+	)
+	if err != nil {
+		return fmt.Errorf("insert drift report: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) QueryDriftReports(ctx context.Context, tenantID string, limit int) ([]DriftReport, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, window_start, window_end, ledger_tokens, prom_tokens,
+			drift_pct, tolerance_pct, exceeded, signature, created_at
+		FROM drift_reports
+		WHERE tenant_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2`, tenantID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query drift reports: %w", err)
+	}
+	defer rows.Close()
+
+	var reports []DriftReport
+	for rows.Next() {
+		var r DriftReport
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.WindowStart, &r.WindowEnd,
+			&r.LedgerTokens, &r.PromTokens, &r.DriftPct, &r.TolerancePct,
+			&r.Exceeded, &r.Signature, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan drift report: %w", err)
+		}
+		reports = append(reports, r)
+	}
+	return reports, rows.Err()
+}
+
+func (s *Store) QueryLatestDriftReport(ctx context.Context, tenantID string) (*DriftReport, error) {
+	var r DriftReport
+	err := s.pool.QueryRow(ctx, `
+		SELECT id, tenant_id, window_start, window_end, ledger_tokens, prom_tokens,
+			drift_pct, tolerance_pct, exceeded, signature, created_at
+		FROM drift_reports
+		WHERE tenant_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1`, tenantID,
+	).Scan(&r.ID, &r.TenantID, &r.WindowStart, &r.WindowEnd,
+		&r.LedgerTokens, &r.PromTokens, &r.DriftPct, &r.TolerancePct,
+		&r.Exceeded, &r.Signature, &r.CreatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("query latest drift report: %w", err)
+	}
+	return &r, nil
+}
+
 func splitPageToken(token string) []string {
 	idx := strings.LastIndex(token, "|")
 	if idx < 0 {

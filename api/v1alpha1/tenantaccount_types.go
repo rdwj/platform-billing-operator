@@ -27,6 +27,7 @@ const (
 	ConditionBalanceStale               = "BalanceStale"
 	ConditionPaymentCorroborationFailed = "PaymentCorroborationFailed"
 	ConditionPaymentDisputed            = "PaymentDisputed"
+	ConditionReconcileDrift             = "ReconcileDrift"
 
 	StatePending   = "Pending"
 	StateActive    = "Active"

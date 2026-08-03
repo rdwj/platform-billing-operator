@@ -42,6 +42,7 @@ import (
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/controller"
+	"github.com/rdwj/platform-billing-operator/internal/drift"
 	"github.com/rdwj/platform-billing-operator/internal/enforcement"
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
 	"github.com/rdwj/platform-billing-operator/internal/metering/gpu"
@@ -305,6 +306,44 @@ func main() {
 			setupLog.Error(err, "unable to add rating job")
 			os.Exit(1)
 		}
+		// --- Drift reconciler ---
+		promURL := os.Getenv("PROMETHEUS_URL")
+		if promURL == "" {
+			promURL = "https://thanos-querier.openshift-monitoring.svc:9091"
+		}
+		driftTolerancePct := os.Getenv("DRIFT_TOLERANCE_PCT")
+		if driftTolerancePct == "" {
+			driftTolerancePct = "5"
+		}
+		driftIntervalStr := os.Getenv("DRIFT_INTERVAL")
+		driftInterval := 24 * time.Hour
+		if driftIntervalStr != "" {
+			if d, err := time.ParseDuration(driftIntervalStr); err == nil {
+				driftInterval = d
+			}
+		}
+		promClient := drift.NewHTTPPromClient(promURL)
+		driftLog := slog.New(logr.ToSlogHandler(ctrl.Log.WithName("drift")))
+		driftJob := drift.New(store, promClient, mgr.GetClient(), driftLog, driftTolerancePct, driftInterval)
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			dlog := ctrl.Log.WithName("drift-reconciler")
+			ticker := time.NewTicker(driftInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+					if err := driftJob.Tick(ctx); err != nil {
+						dlog.Error(err, "drift tick failed")
+					}
+				}
+			}
+		})); err != nil {
+			setupLog.Error(err, "unable to add drift reconciler")
+			os.Exit(1)
+		}
+
 		setupLog.Info("ledger-dependent components started", "dsn", "***")
 	} else {
 		setupLog.Info("LEDGER_DSN not set; balance controller and rating job disabled")

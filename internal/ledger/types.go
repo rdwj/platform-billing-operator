@@ -100,3 +100,17 @@ type AdjustmentRow struct {
 	IdempotencyKey string    `json:"idempotency_key"`
 	CreatedAt      time.Time `json:"created_at"`
 }
+
+type DriftReport struct {
+	ID           int64     `json:"id"`
+	TenantID     string    `json:"tenant_id"`
+	WindowStart  time.Time `json:"window_start"`
+	WindowEnd    time.Time `json:"window_end"`
+	LedgerTokens int64     `json:"ledger_tokens"`
+	PromTokens   int64     `json:"prom_tokens"`
+	DriftPct     string    `json:"drift_pct"`
+	TolerancePct string    `json:"tolerance_pct"`
+	Exceeded     bool      `json:"exceeded"`
+	Signature    string    `json:"signature"`
+	CreatedAt    time.Time `json:"created_at"`
+}

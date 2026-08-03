@@ -24,6 +24,7 @@ func main() {
 	rootCmd.AddCommand(keysCmd())
 	rootCmd.AddCommand(pspCmd())
 	rootCmd.AddCommand(budgetCmd())
+	rootCmd.AddCommand(driftCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
