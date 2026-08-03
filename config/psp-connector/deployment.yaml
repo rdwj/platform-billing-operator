@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: psp-connector
+  namespace: billing-system
+  labels:
+    app: psp-connector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: psp-connector
+  template:
+    metadata:
+      labels:
+        app: psp-connector
+    spec:
+      serviceAccountName: psp-connector
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: psp-connector
+          image: psp-connector:latest
+          args:
+            - --addr=:8090
+            - --ledger-url=http://ledger-svc.billing-system.svc:8080
+          env:
+            - name: CONNECTOR_NAME
+              value: ""
+            - name: PSP_NAMESPACE
+              value: billing-system
+          ports:
+            - containerPort: 8090
+              name: webhook
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8090
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
