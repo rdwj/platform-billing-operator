@@ -72,9 +72,9 @@ func pspStatusCmd() *cobra.Command {
 
 			w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 			if allNamespaces {
-				fmt.Fprintln(w, "NAMESPACE\tNAME\tTYPE\tCONNECTED\tCREDENTIALS\tWEBHOOKS 24H\tSIG FAILURES\tAGE")
+				_, _ = fmt.Fprintln(w, "NAMESPACE\tNAME\tTYPE\tCONNECTED\tCREDENTIALS\tWEBHOOKS 24H\tSIG FAILURES\tAGE")
 			} else {
-				fmt.Fprintln(w, "NAME\tTYPE\tCONNECTED\tCREDENTIALS\tWEBHOOKS 24H\tSIG FAILURES\tAGE")
+				_, _ = fmt.Fprintln(w, "NAME\tTYPE\tCONNECTED\tCREDENTIALS\tWEBHOOKS 24H\tSIG FAILURES\tAGE")
 			}
 
 			for i := range connectors.Items {
@@ -90,10 +90,10 @@ func pspStatusCmd() *cobra.Command {
 				connected := fmt.Sprintf("%v", c.Status.Connected)
 
 				if allNamespaces {
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 						c.Namespace, c.Name, c.Spec.Type, connected, creds, webhooks, sigFail, age)
 				} else {
-					fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					_, _ = fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 						c.Name, c.Spec.Type, connected, creds, webhooks, sigFail, age)
 				}
 			}
