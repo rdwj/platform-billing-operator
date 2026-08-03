@@ -104,7 +104,7 @@ func TestWebhookHandler_UnknownEvent(t *testing.T) {
 
 func TestWebhookHandler_PaymentSucceeded(t *testing.T) {
 	backend := &RecordingBackend{}
-	backend.CreatePaymentIntent(nil, testTenant(), "50.000000")
+	_, _ = backend.CreatePaymentIntent(nil, testTenant(), "50.000000")
 	ledger := &StubLedgerClient{}
 	k8s := &RecordingK8sUpdater{}
 	h := newTestHandler(backend, ledger, k8s)
@@ -220,7 +220,7 @@ func TestWebhookHandler_PaymentDisputed(t *testing.T) {
 
 func TestWebhookHandler_IdempotentReplay(t *testing.T) {
 	backend := &RecordingBackend{}
-	backend.CreatePaymentIntent(nil, testTenant(), "50.000000")
+	_, _ = backend.CreatePaymentIntent(nil, testTenant(), "50.000000")
 	ledger := &StubLedgerClient{}
 	k8s := &RecordingK8sUpdater{}
 	h := newTestHandler(backend, ledger, k8s)
@@ -249,7 +249,7 @@ func TestWebhookHandler_IdempotentReplay(t *testing.T) {
 
 func TestWebhookHandler_LedgerError(t *testing.T) {
 	backend := &RecordingBackend{}
-	backend.CreatePaymentIntent(nil, testTenant(), "50.000000")
+	_, _ = backend.CreatePaymentIntent(nil, testTenant(), "50.000000")
 	ledger := &StubLedgerClient{Err: errors.New("connection refused")}
 	h := newTestHandler(backend, ledger, &RecordingK8sUpdater{})
 
