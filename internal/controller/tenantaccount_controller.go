@@ -34,6 +34,7 @@ import (
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/enforcement"
+	"github.com/rdwj/platform-billing-operator/internal/psp"
 )
 
 const (
@@ -60,6 +61,7 @@ type TenantAccountReconciler struct {
 	Scheme           *runtime.Scheme
 	Ledger           BalanceQuerier
 	Enforcement      enforcement.EnforcementBackend
+	PSP              psp.PSPBackend
 	RequeueInterval  time.Duration
 	MinPatchInterval time.Duration
 	lastPatch        sync.Map
@@ -138,6 +140,8 @@ func (r *TenantAccountReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 
+	r.maybeReload(ctx, &acct, balance, state)
+
 	acct.Status.Balance = balance
 	acct.Status.BalanceObservedAt = &observedAt
 	acct.Status.MtdSpend = mtdSpend
@@ -209,6 +213,14 @@ func (r *TenantAccountReconciler) handleLedgerUnavailable(ctx context.Context, a
 func (r *TenantAccountReconciler) computeState(acct *billingv1alpha1.TenantAccount, balance string) string {
 	if acct.Spec.BillingMode == billingv1alpha1.BillingModeShowbackOnly {
 		return billingv1alpha1.StateActive
+	}
+
+	// Payment failure escalation takes precedence over balance-based state.
+	if acct.Status.ConsecutivePaymentFailures >= 3 {
+		return billingv1alpha1.StateFrozen
+	}
+	if acct.Status.ConsecutivePaymentFailures > 0 {
+		return billingv1alpha1.StateDunning
 	}
 
 	bal, err := decimal.NewFromString(balance)
@@ -302,7 +314,7 @@ func (r *TenantAccountReconciler) shouldApplyAllowance(state, billingMode string
 		return false
 	}
 	switch state {
-	case billingv1alpha1.StateActive, billingv1alpha1.StateWarning, billingv1alpha1.StateGrace:
+	case billingv1alpha1.StateActive, billingv1alpha1.StateWarning, billingv1alpha1.StateGrace, billingv1alpha1.StateDunning:
 		return true
 	default:
 		return false
@@ -429,6 +441,51 @@ func normalizeRate(rate, unit string) (string, error) {
 	default:
 		return d.String(), nil
 	}
+}
+
+// maybeReload creates a PaymentIntent when the tenant's balance crosses below
+// the reload threshold. Skips if no PSP backend, no reload policy, already
+// has a pending intent (idempotency), or tenant is Frozen.
+func (r *TenantAccountReconciler) maybeReload(ctx context.Context, acct *billingv1alpha1.TenantAccount, balance, state string) {
+	if r.PSP == nil {
+		return
+	}
+	if acct.Spec.BillingMode == billingv1alpha1.BillingModeShowbackOnly {
+		return
+	}
+	if acct.Spec.ReloadPolicy == nil || !acct.Spec.ReloadPolicy.Enabled {
+		return
+	}
+	switch state {
+	case billingv1alpha1.StateActive, billingv1alpha1.StateWarning, billingv1alpha1.StateGrace, billingv1alpha1.StateDunning:
+	default:
+		return
+	}
+	if acct.Status.PendingReloadIntentID != "" {
+		return
+	}
+
+	bal, err := decimal.NewFromString(balance)
+	if err != nil {
+		return
+	}
+	threshold, err := decimal.NewFromString(acct.Spec.ReloadPolicy.ThresholdAmount)
+	if err != nil {
+		return
+	}
+	if bal.GreaterThanOrEqual(threshold) {
+		return
+	}
+
+	logger := log.FromContext(ctx)
+	intentID, err := r.PSP.CreatePaymentIntent(ctx, acct, acct.Spec.ReloadPolicy.ReloadAmount)
+	if err != nil {
+		logger.Error(err, "creating reload payment intent")
+		return
+	}
+
+	acct.Status.PendingReloadIntentID = intentID
+	logger.Info("reload payment intent created", "intentID", intentID, "amount", acct.Spec.ReloadPolicy.ReloadAmount)
 }
 
 func (r *TenantAccountReconciler) SetupWithManager(mgr ctrl.Manager) error {

@@ -239,6 +239,12 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              consecutivePaymentFailures:
+                description: |-
+                  ConsecutivePaymentFailures tracks consecutive payment failures for
+                  event-gated Dunning → Frozen escalation (M=3). Reset on success.
+                format: int32
+                type: integer
               mtdSpend:
                 description: MtdSpend is the month-to-date spend as a decimal string.
                 type: string
@@ -247,6 +253,11 @@ spec:
                   by the controller.
                 format: int64
                 type: integer
+              pendingReloadIntentID:
+                description: |-
+                  PendingReloadIntentID is the PSP intent ID of an in-flight reload
+                  payment. Prevents duplicate PaymentIntent creation.
+                type: string
               runwayDays:
                 description: |-
                   RunwayDays is the estimated days of service remaining at the current
@@ -259,6 +270,7 @@ spec:
                 - Active
                 - Warning
                 - Grace
+                - Dunning
                 - Frozen
                 - Suspended
                 - Closed

@@ -30,6 +30,7 @@ const (
 	StateActive    = "Active"
 	StateWarning   = "Warning"
 	StateGrace     = "Grace"
+	StateDunning   = "Dunning"
 	StateFrozen    = "Frozen"
 	StateSuspended = "Suspended"
 	StateClosed    = "Closed"
@@ -119,7 +120,7 @@ type TenantAccountSpec struct {
 // TenantAccountStatus defines the observed state of a TenantAccount.
 type TenantAccountStatus struct {
 	// State is the current lifecycle state of this TenantAccount.
-	// +kubebuilder:validation:Enum=Pending;Active;Warning;Grace;Frozen;Suspended;Closed
+	// +kubebuilder:validation:Enum=Pending;Active;Warning;Grace;Dunning;Frozen;Suspended;Closed
 	// +optional
 	State string `json:"state,omitempty"`
 
@@ -146,6 +147,16 @@ type TenantAccountStatus struct {
 	// used for enforcement. Decimal string format.
 	// +optional
 	AllowanceTokens string `json:"allowanceTokens,omitempty"`
+
+	// ConsecutivePaymentFailures tracks consecutive payment failures for
+	// event-gated Dunning → Frozen escalation (M=3). Reset on success.
+	// +optional
+	ConsecutivePaymentFailures int32 `json:"consecutivePaymentFailures,omitempty"`
+
+	// PendingReloadIntentID is the PSP intent ID of an in-flight reload
+	// payment. Prevents duplicate PaymentIntent creation.
+	// +optional
+	PendingReloadIntentID string `json:"pendingReloadIntentID,omitempty"`
 
 	// Conditions represent the latest available observations of the
 	// TenantAccount's state.

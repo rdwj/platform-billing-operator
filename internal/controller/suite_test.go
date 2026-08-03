@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
+	"github.com/rdwj/platform-billing-operator/internal/psp"
 )
 
 var (
@@ -44,6 +45,7 @@ var (
 	k8sClient   client.Client
 	testLedger  *stubBalanceQuerier
 	testBackend *recordingBackend
+	testPSP     *psp.RecordingBackend
 )
 
 func TestControllers(t *testing.T) {
@@ -90,11 +92,13 @@ var _ = BeforeSuite(func() {
 
 	testLedger = &stubBalanceQuerier{}
 	testBackend = &recordingBackend{}
+	testPSP = &psp.RecordingBackend{}
 	err = (&TenantAccountReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
 		Ledger:           testLedger,
 		Enforcement:      testBackend,
+		PSP:              testPSP,
 		RequeueInterval:  200 * time.Millisecond,
 		MinPatchInterval: time.Millisecond,
 	}).SetupWithManager(mgr)

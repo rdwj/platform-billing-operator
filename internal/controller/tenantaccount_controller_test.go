@@ -525,6 +525,61 @@ var _ = Describe("TenantAccountReconciler", func() {
 					Spec:   billingv1alpha1.TenantAccountSpec{BillingMode: "Prepaid"},
 					Status: billingv1alpha1.TenantAccountStatus{State: "Grace"},
 				}, "not-a-number", "Grace"),
+
+			// Dunning state machine entries (event-gated, M=3)
+			Entry("1 payment failure → Dunning",
+				&billingv1alpha1.TenantAccount{
+					Spec:   billingv1alpha1.TenantAccountSpec{BillingMode: "Prepaid"},
+					Status: billingv1alpha1.TenantAccountStatus{State: "Active", ConsecutivePaymentFailures: 1},
+				}, "500.000000", "Dunning"),
+
+			Entry("2 payment failures → Dunning",
+				&billingv1alpha1.TenantAccount{
+					Spec:   billingv1alpha1.TenantAccountSpec{BillingMode: "Prepaid"},
+					Status: billingv1alpha1.TenantAccountStatus{State: "Active", ConsecutivePaymentFailures: 2},
+				}, "500.000000", "Dunning"),
+
+			Entry("3 payment failures → Frozen",
+				&billingv1alpha1.TenantAccount{
+					Spec:   billingv1alpha1.TenantAccountSpec{BillingMode: "Prepaid"},
+					Status: billingv1alpha1.TenantAccountStatus{State: "Dunning", ConsecutivePaymentFailures: 3},
+				}, "500.000000", "Frozen"),
+
+			Entry("5 payment failures → Frozen",
+				&billingv1alpha1.TenantAccount{
+					Spec:   billingv1alpha1.TenantAccountSpec{BillingMode: "Prepaid"},
+					Status: billingv1alpha1.TenantAccountStatus{State: "Dunning", ConsecutivePaymentFailures: 5},
+				}, "500.000000", "Frozen"),
+
+			Entry("Payment failure recovery (counter reset) → Active",
+				&billingv1alpha1.TenantAccount{
+					Spec:   billingv1alpha1.TenantAccountSpec{BillingMode: "Prepaid"},
+					Status: billingv1alpha1.TenantAccountStatus{State: "Dunning", ConsecutivePaymentFailures: 0},
+				}, "500.000000", "Active"),
+
+			Entry("1 failure + zero balance → Dunning (failures take precedence over balance freeze)",
+				&billingv1alpha1.TenantAccount{
+					Spec: billingv1alpha1.TenantAccountSpec{
+						BillingMode: "Prepaid",
+						GracePolicy: &billingv1alpha1.GracePolicy{GraceAmount: "0.000000"},
+					},
+					Status: billingv1alpha1.TenantAccountStatus{State: "Active", ConsecutivePaymentFailures: 1},
+				}, "0.000000", "Dunning"),
+
+			Entry("ShowbackOnly ignores payment failures",
+				&billingv1alpha1.TenantAccount{
+					Spec:   billingv1alpha1.TenantAccountSpec{BillingMode: "ShowbackOnly"},
+					Status: billingv1alpha1.TenantAccountStatus{State: "Active", ConsecutivePaymentFailures: 5},
+				}, "500.000000", "Active"),
+
+			Entry("Payment failures take precedence over balance-based Grace",
+				&billingv1alpha1.TenantAccount{
+					Spec: billingv1alpha1.TenantAccountSpec{
+						BillingMode: "Prepaid",
+						GracePolicy: &billingv1alpha1.GracePolicy{GraceAmount: "50.000000"},
+					},
+					Status: billingv1alpha1.TenantAccountStatus{State: "Grace", ConsecutivePaymentFailures: 2},
+				}, "-10.000000", "Dunning"),
 		)
 	})
 
@@ -1069,6 +1124,246 @@ var _ = Describe("TenantAccountReconciler", func() {
 				return testBackend.callsForTenant(tenantName)
 			}, 2*time.Second, 200*time.Millisecond).Should(BeEmpty(),
 				"ShowbackOnly tenants should never trigger enforcement calls")
+		})
+	})
+
+	Context("Dunning lifecycle: Active → Dunning → Frozen via payment failures", func() {
+		It("should transition through Dunning states based on ConsecutivePaymentFailures", func() {
+			ns := createTestNamespace(ctx, "dunning-lifecycle")
+			tenantName := "ten-dunning-lifecycle"
+
+			setBalance(tenantName, "500.000000")
+			testLedger.mu.Lock()
+			if testLedger.spends == nil {
+				testLedger.spends = make(map[string]string)
+			}
+			testLedger.spends[tenantName] = "0"
+			testLedger.mu.Unlock()
+
+			acct := &billingv1alpha1.TenantAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tenantName,
+					Namespace: ns,
+				},
+				Spec: billingv1alpha1.TenantAccountSpec{
+					DisplayName: "Dunning Co",
+					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
+					BillingMode: "Prepaid",
+				},
+			}
+			Expect(k8sClient.Create(ctx, acct)).To(Succeed())
+
+			// Should activate with positive balance
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.State).To(Equal("Active"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Simulate 1 payment failure → Dunning
+			var fetched billingv1alpha1.TenantAccount
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &fetched)).To(Succeed())
+			fetched.Status.ConsecutivePaymentFailures = 1
+			Expect(k8sClient.Status().Update(ctx, &fetched)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				var f billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &f)).To(Succeed())
+				g.Expect(f.Status.State).To(Equal("Dunning"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Escalate to 3 failures → Frozen
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &fetched)).To(Succeed())
+			fetched.Status.ConsecutivePaymentFailures = 3
+			Expect(k8sClient.Status().Update(ctx, &fetched)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				var f billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &f)).To(Succeed())
+				g.Expect(f.Status.State).To(Equal("Frozen"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Recovery: clear failures → Active (balance still positive)
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &fetched)).To(Succeed())
+			fetched.Status.ConsecutivePaymentFailures = 0
+			Expect(k8sClient.Status().Update(ctx, &fetched)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				var f billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &f)).To(Succeed())
+				g.Expect(f.Status.State).To(Equal("Active"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+		})
+	})
+
+	Context("Reload: creates exactly one PaymentIntent per threshold crossing", func() {
+		It("should create one intent and not duplicate on subsequent reconciles", func() {
+			ns := createTestNamespace(ctx, "reload-idem")
+			tenantName := "ten-reload-idem"
+
+			initialIntentCount := len(testPSP.GetIntents())
+
+			setBalance(tenantName, "3000.000000")
+			testLedger.mu.Lock()
+			if testLedger.spends == nil {
+				testLedger.spends = make(map[string]string)
+			}
+			testLedger.spends[tenantName] = "0"
+			testLedger.mu.Unlock()
+
+			acct := &billingv1alpha1.TenantAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tenantName,
+					Namespace: ns,
+				},
+				Spec: billingv1alpha1.TenantAccountSpec{
+					DisplayName: "Reload Co",
+					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
+					BillingMode: "Prepaid",
+					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
+						Enabled:          true,
+						ThresholdAmount:  "5000.000000",
+						ReloadAmount:     "25000.000000",
+						MonthlyCapAmount: "60000.000000",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, acct)).To(Succeed())
+
+			// Balance $3000 < threshold $5000 → should trigger reload.
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.PendingReloadIntentID).NotTo(BeEmpty(),
+					"Should have a pending reload intent")
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Exactly one new intent should exist for this tenant.
+			newIntents := testPSP.GetIntents()[initialIntentCount:]
+			Expect(newIntents).To(HaveLen(1),
+				fmt.Sprintf("Expected exactly 1 new intent, got %d", len(newIntents)))
+			Expect(newIntents[0].Amount).To(Equal("25000.000000"))
+			Expect(newIntents[0].TenantName).To(Equal(tenantName))
+
+			// Subsequent reconciles should not create duplicates.
+			Consistently(func() int {
+				return len(testPSP.GetIntents())
+			}, 2*time.Second, 200*time.Millisecond).Should(Equal(initialIntentCount+1),
+				"No duplicate intents after initial reload")
+		})
+	})
+
+	Context("Reload: balance above threshold does not trigger reload", func() {
+		It("should not create a PaymentIntent when balance >= threshold", func() {
+			ns := createTestNamespace(ctx, "reload-above")
+			tenantName := "ten-reload-above"
+
+			setBalance(tenantName, "10000.000000")
+			testLedger.mu.Lock()
+			if testLedger.spends == nil {
+				testLedger.spends = make(map[string]string)
+			}
+			testLedger.spends[tenantName] = "0"
+			testLedger.mu.Unlock()
+
+			initialIntentCount := len(testPSP.GetIntents())
+
+			acct := &billingv1alpha1.TenantAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tenantName,
+					Namespace: ns,
+				},
+				Spec: billingv1alpha1.TenantAccountSpec{
+					DisplayName: "Above Threshold Co",
+					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
+					BillingMode: "Prepaid",
+					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
+						Enabled:          true,
+						ThresholdAmount:  "5000.000000",
+						ReloadAmount:     "25000.000000",
+						MonthlyCapAmount: "60000.000000",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, acct)).To(Succeed())
+
+			// Wait for reconcile to run (state should be set).
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.Balance).To(Equal("10000.000000"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// No new intents should have been created.
+			Consistently(func() int {
+				return len(testPSP.GetIntents())
+			}, 2*time.Second, 200*time.Millisecond).Should(Equal(initialIntentCount),
+				"No reload intent should be created when balance >= threshold")
+		})
+	})
+
+	Context("Reload: Frozen tenant does not trigger reload", func() {
+		It("should not create a PaymentIntent for Frozen tenants", func() {
+			ns := createTestNamespace(ctx, "reload-frozen")
+			tenantName := "ten-reload-frozen"
+
+			// Start with balance above threshold to prevent reload on first reconcile.
+			setBalance(tenantName, "10000.000000")
+			testLedger.mu.Lock()
+			if testLedger.spends == nil {
+				testLedger.spends = make(map[string]string)
+			}
+			testLedger.spends[tenantName] = "0"
+			testLedger.mu.Unlock()
+
+			acct := &billingv1alpha1.TenantAccount{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tenantName,
+					Namespace: ns,
+				},
+				Spec: billingv1alpha1.TenantAccountSpec{
+					DisplayName: "Frozen Reload Co",
+					PlanRef:     corev1.LocalObjectReference{Name: "basic"},
+					BillingMode: "Prepaid",
+					ReloadPolicy: &billingv1alpha1.ReloadPolicy{
+						Enabled:          true,
+						ThresholdAmount:  "5000.000000",
+						ReloadAmount:     "25000.000000",
+						MonthlyCapAmount: "60000.000000",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, acct)).To(Succeed())
+
+			// Wait for Active state (balance $10k > threshold $5k, no reload).
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.State).To(Equal("Active"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Drop balance below threshold AND set 3 payment failures → Frozen.
+			setBalance(tenantName, "1000.000000")
+			var fetched billingv1alpha1.TenantAccount
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &fetched)).To(Succeed())
+			fetched.Status.ConsecutivePaymentFailures = 3
+			Expect(k8sClient.Status().Update(ctx, &fetched)).To(Succeed())
+
+			// Wait for Frozen state.
+			Eventually(func(g Gomega) {
+				var f billingv1alpha1.TenantAccount
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tenantName, Namespace: ns}, &f)).To(Succeed())
+				g.Expect(f.Status.State).To(Equal("Frozen"))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Snapshot intent count after Frozen is confirmed.
+			frozenIntentCount := len(testPSP.GetIntents())
+
+			// Verify no new intents created while Frozen.
+			Consistently(func() int {
+				return len(testPSP.GetIntents())
+			}, 2*time.Second, 200*time.Millisecond).Should(Equal(frozenIntentCount),
+				"No reload intent should be created for Frozen tenants")
 		})
 	})
 

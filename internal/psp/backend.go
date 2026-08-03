@@ -156,3 +156,12 @@ func (r *RecordingBackend) GetPaymentStatus(_ context.Context, intentID string) 
 	})
 	return status, nil
 }
+
+// GetIntents returns a copy of the recorded intents, safe for concurrent use.
+func (r *RecordingBackend) GetIntents() []RecordedIntent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]RecordedIntent, len(r.Intents))
+	copy(result, r.Intents)
+	return result
+}
