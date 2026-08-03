@@ -508,6 +508,22 @@ func (s *Store) QueryAdjustmentCount(ctx context.Context, tenantID, kind string,
 	return count, nil
 }
 
+// QueryPeriodSpend returns the total charges for a tenant since the given time.
+func (s *Store) QueryPeriodSpend(ctx context.Context, tenantID string, since time.Time) (string, error) {
+	var spend string
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(sum(amount), 0)
+		FROM charges
+		WHERE tenant_id = $1
+		  AND rated_at >= $2`,
+		tenantID, since,
+	).Scan(&spend)
+	if err != nil {
+		return "", fmt.Errorf("query period spend: %w", err)
+	}
+	return spend, nil
+}
+
 type Key struct {
 	KeyName    string
 	TenantID   string

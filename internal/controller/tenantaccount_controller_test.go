@@ -39,6 +39,7 @@ type stubBalanceQuerier struct {
 	mu               sync.Mutex
 	balances         map[string]string
 	spends           map[string]string
+	periodSpends     map[string]string // "tenant:since" -> period spend
 	wallets          map[string]string
 	errors           map[string]error  // tenant -> error to return
 	adjustmentTotals map[string]string // "tenant:kind" -> total amount
@@ -67,6 +68,17 @@ func (s *stubBalanceQuerier) QueryMTDSpend(_ context.Context, tenantID string) (
 	defer s.mu.Unlock()
 	if s.spends != nil {
 		if sp, ok := s.spends[tenantID]; ok {
+			return sp, nil
+		}
+	}
+	return "0", nil
+}
+
+func (s *stubBalanceQuerier) QueryPeriodSpend(_ context.Context, tenantID string, _ time.Time) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.periodSpends != nil {
+		if sp, ok := s.periodSpends[tenantID]; ok {
 			return sp, nil
 		}
 	}
@@ -141,6 +153,15 @@ func setLedgerError(tenantName string, err error) {
 
 func clearLedgerError(tenantName string) {
 	setLedgerError(tenantName, nil)
+}
+
+func setPeriodSpend(tenantName, spend string) {
+	testLedger.mu.Lock()
+	if testLedger.periodSpends == nil {
+		testLedger.periodSpends = make(map[string]string)
+	}
+	testLedger.periodSpends[tenantName] = spend
+	testLedger.mu.Unlock()
 }
 
 func setPaymentCreditTotal(tenantName, total string) {

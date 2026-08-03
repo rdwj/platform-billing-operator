@@ -273,6 +273,17 @@ func main() {
 			os.Exit(1)
 		}
 
+		if err = (&controller.BudgetPolicyReconciler{
+			Client:      mgr.GetClient(),
+			Scheme:      mgr.GetScheme(),
+			Ledger:      store,
+			Enforcement: enforcementBackend,
+			Recorder:    mgr.GetEventRecorderFor("budgetpolicy-controller"),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "BudgetPolicy")
+			os.Exit(1)
+		}
+
 		resolver := rater.NewK8sResolver(mgr.GetClient())
 		raterLog := slog.New(logr.ToSlogHandler(ctrl.Log.WithName("rater")))
 		ratingJob := raterjob.New(store, resolver, raterLog)

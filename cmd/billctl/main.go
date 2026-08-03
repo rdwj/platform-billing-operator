@@ -23,6 +23,7 @@ func main() {
 	rootCmd.AddCommand(adjustCmd())
 	rootCmd.AddCommand(keysCmd())
 	rootCmd.AddCommand(pspCmd())
+	rootCmd.AddCommand(budgetCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

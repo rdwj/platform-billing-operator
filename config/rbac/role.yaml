@@ -7,6 +7,13 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ""
+  resources:
   - namespaces
   verbs:
   - get
@@ -23,6 +30,7 @@ rules:
   - billing.opendatahub.io
   resources:
   - billingconnectors
+  - budgetpolicies
   - plans
   - tenantaccounts
   verbs:
@@ -35,6 +43,7 @@ rules:
   - billing.opendatahub.io
   resources:
   - billingconnectors/status
+  - budgetpolicies/status
   - plans/status
   - tenantaccounts/status
   verbs:
@@ -44,6 +53,7 @@ rules:
 - apiGroups:
   - billing.opendatahub.io
   resources:
+  - budgetpolicies/finalizers
   - plans/finalizers
   - tenantaccounts/finalizers
   verbs:

@@ -107,6 +107,16 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = (&BudgetPolicyReconciler{
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		Ledger:          testLedger,
+		Enforcement:     testBackend,
+		Recorder:        mgr.GetEventRecorderFor("budgetpolicy-controller"),
+		RequeueInterval: 200 * time.Millisecond,
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
 	err = (&BillingConnectorReconciler{
 		Client:   mgr.GetClient(),
 		Scheme:   mgr.GetScheme(),
