@@ -65,24 +65,6 @@ func (r *BillingConnectorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	// Webhook type: not yet implemented.
-	if bc.Spec.Type == billingv1alpha1.ConnectorTypeWebhook {
-		logger.Info("webhook backend not yet implemented", "connector", bc.Name)
-		bc.Status.Connected = false
-		apimeta.SetStatusCondition(&bc.Status.Conditions, metav1.Condition{
-			Type:               billingv1alpha1.ConditionCredentialsValid,
-			Status:             metav1.ConditionFalse,
-			ObservedGeneration: bc.Generation,
-			Reason:             "NotImplemented",
-			Message:            "Webhook backend type is not yet implemented",
-		})
-		bc.Status.ObservedGeneration = bc.Generation
-		if err := r.Status().Update(ctx, &bc); err != nil {
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{}, nil
-	}
-
 	// Fetch the credentials Secret.
 	var secret corev1.Secret
 	secretKey := types.NamespacedName{
@@ -131,6 +113,32 @@ func (r *BillingConnectorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 		// Construct and register the Stripe backend.
 		backend := psp.NewStripeBackend(string(sk), string(ws))
+		r.Registry.Set(bc.Name, backend)
+
+		bc.Status.Connected = true
+		apimeta.SetStatusCondition(&bc.Status.Conditions, metav1.Condition{
+			Type:               billingv1alpha1.ConditionCredentialsValid,
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: bc.Generation,
+			Reason:             "Valid",
+			Message:            "Credentials validated and backend registered",
+		})
+
+	case billingv1alpha1.ConnectorTypeWebhook:
+		hmacKey := secret.Data["hmacSecret"]
+		if len(hmacKey) == 0 {
+			bc.Status.Connected = false
+			apimeta.SetStatusCondition(&bc.Status.Conditions, metav1.Condition{
+				Type:               billingv1alpha1.ConditionCredentialsValid,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: bc.Generation,
+				Reason:             "MissingKeys",
+				Message:            `Secret must contain a non-empty "hmacSecret" key`,
+			})
+			break
+		}
+
+		backend := psp.NewWebhookBackend(string(hmacKey))
 		r.Registry.Set(bc.Name, backend)
 
 		bc.Status.Connected = true

@@ -212,19 +212,17 @@ var _ = Describe("BillingConnector Controller", func() {
 		})
 	})
 
-	Context("When type=webhook", func() {
-		It("Should set ConditionCredentialsValid with NotImplemented reason", func() {
-			ns := createTestNamespace(ctx, "bc-webhook")
+	Context("When type=webhook with valid credentials", func() {
+		It("Should set Connected=true when hmacSecret is present", func() {
+			ns := createTestNamespace(ctx, "bc-webhook-valid")
 
-			// Even though webhook isn't implemented, create a Secret so the test
-			// focuses on the type check, not the missing-secret path.
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "webhook-creds",
 					Namespace: ns,
 				},
 				Data: map[string][]byte{
-					"hmacSecret": []byte("test-hmac-secret"),
+					"hmacSecret": []byte("test-hmac-secret-value"),
 				},
 			}
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
@@ -249,12 +247,63 @@ var _ = Describe("BillingConnector Controller", func() {
 					Name:      "test-webhook-connector",
 					Namespace: ns,
 				}, &fetched)).To(Succeed())
-				g.Expect(fetched.Status.Connected).To(BeFalse(),
-					"Connected should be false for unimplemented webhook type")
+				g.Expect(fetched.Status.Connected).To(BeTrue(),
+					"Connected should be true when hmacSecret is valid")
 				cond := apimeta.FindStatusCondition(fetched.Status.Conditions, billingv1alpha1.ConditionCredentialsValid)
 				g.Expect(cond).NotTo(BeNil(), "CredentialsValid condition should exist")
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(cond.Reason).To(Equal("Valid"))
+				g.Expect(fetched.Status.ObservedGeneration).To(Equal(fetched.Generation))
+			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
+
+			// Verify the backend is registered in the registry.
+			backend, ok := testRegistry.Get("test-webhook-connector")
+			Expect(ok).To(BeTrue(), "Backend should be registered in the registry")
+			Expect(backend).NotTo(BeNil())
+		})
+	})
+
+	Context("When type=webhook with missing hmacSecret", func() {
+		It("Should set MissingKeys when hmacSecret key is absent", func() {
+			ns := createTestNamespace(ctx, "bc-webhook-nokey")
+
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "webhook-creds-nokey",
+					Namespace: ns,
+				},
+				Data: map[string][]byte{
+					"wrongKey": []byte("some-value"),
+				},
+			}
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+			bc := &billingv1alpha1.BillingConnector{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-webhook-nokey",
+					Namespace: ns,
+				},
+				Spec: billingv1alpha1.BillingConnectorSpec{
+					Type: billingv1alpha1.ConnectorTypeWebhook,
+					CredentialsSecretRef: corev1.LocalObjectReference{
+						Name: "webhook-creds-nokey",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, bc)).To(Succeed())
+
+			Eventually(func(g Gomega) {
+				var fetched billingv1alpha1.BillingConnector
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name:      "test-webhook-nokey",
+					Namespace: ns,
+				}, &fetched)).To(Succeed())
+				g.Expect(fetched.Status.Connected).To(BeFalse(),
+					"Connected should be false when hmacSecret is missing")
+				cond := apimeta.FindStatusCondition(fetched.Status.Conditions, billingv1alpha1.ConditionCredentialsValid)
+				g.Expect(cond).NotTo(BeNil())
 				g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
-				g.Expect(cond.Reason).To(Equal("NotImplemented"))
+				g.Expect(cond.Reason).To(Equal("MissingKeys"))
 			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
 		})
 	})
