@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/shopspring/decimal"
-	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -165,7 +164,6 @@ func TestTick_DriftExceedsThreshold(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "tenant-a", Namespace: "default"},
 		Spec: billingv1alpha1.TenantAccountSpec{
 			DisplayName: "Tenant A",
-			PlanRef:     corev1.LocalObjectReference{Name: "test-plan"},
 			BillingMode: billingv1alpha1.BillingModePrepaid,
 		},
 	}
@@ -220,7 +218,6 @@ func TestTick_DriftWithinThreshold(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "tenant-b", Namespace: "default"},
 		Spec: billingv1alpha1.TenantAccountSpec{
 			DisplayName: "Tenant B",
-			PlanRef:     corev1.LocalObjectReference{Name: "test-plan"},
 			BillingMode: billingv1alpha1.BillingModePrepaid,
 		},
 	}
@@ -269,7 +266,6 @@ func TestTick_BothZero(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "tenant-c", Namespace: "default"},
 		Spec: billingv1alpha1.TenantAccountSpec{
 			DisplayName: "Tenant C",
-			PlanRef:     corev1.LocalObjectReference{Name: "test-plan"},
 			BillingMode: billingv1alpha1.BillingModeShowbackOnly,
 		},
 	}
