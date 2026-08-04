@@ -48,13 +48,14 @@ var (
 )
 
 const (
-	consoleResourceName  = "billing-console"
-	consoleSingletonName = "default"
-	consoleListenPort    = 9090
-	oauthProxyImage      = "registry.redhat.io/openshift4/ose-oauth-proxy:latest"
-	oauthProxyPort       = 4180
-	consoleSAName        = "billing-console"
-	consoleCookieSecret  = "billing-console-oauth"
+	consoleResourceName    = "billing-console"
+	consoleSingletonName   = "default"
+	consoleListenPort      = 9090
+	oauthProxyImage        = "registry.redhat.io/openshift4/ose-oauth-proxy:latest"
+	oauthProxyPort         = 4180
+	consoleSAName          = "billing-console"
+	consoleCookieSecret    = "billing-console-oauth"
+	reasonIncompleteConfig = "IncompleteConfig"
 )
 
 // BillingConsoleReconciler reconciles a BillingConsole object.
@@ -256,13 +257,15 @@ func (r *BillingConsoleReconciler) reconcileDeployment(ctx context.Context, cons
 		tenantPortalEnabled = "false"
 	}
 
-	envVars := []corev1.EnvVar{
-		{Name: "LEDGER_URL", Value: ledgerURL},
-		{Name: "LISTEN_ADDR", Value: ":9090"},
-		{Name: "OPERATOR_NAMESPACE", Value: r.OperatorNamespace},
-		{Name: "TENANT_PORTAL_ENABLED", Value: tenantPortalEnabled},
-	}
-	envVars = append(envVars, r.authEnvVars(console, authMode)...)
+	authVars := r.authEnvVars(console, authMode)
+	envVars := make([]corev1.EnvVar, 0, 4+len(authVars))
+	envVars = append(envVars,
+		corev1.EnvVar{Name: "LEDGER_URL", Value: ledgerURL},
+		corev1.EnvVar{Name: "LISTEN_ADDR", Value: ":9090"},
+		corev1.EnvVar{Name: "OPERATOR_NAMESPACE", Value: r.OperatorNamespace},
+		corev1.EnvVar{Name: "TENANT_PORTAL_ENABLED", Value: tenantPortalEnabled},
+	)
+	envVars = append(envVars, authVars...)
 
 	consoleContainer := corev1.Container{
 		Name:  "console",
@@ -670,11 +673,11 @@ func (r *BillingConsoleReconciler) setAuthCondition(ctx context.Context, console
 	case billingv1alpha1.AuthModeOIDC:
 		if console.Spec.Auth.OIDC == nil || console.Spec.Auth.OIDC.IssuerURL == "" {
 			cond.Status = metav1.ConditionFalse
-			cond.Reason = "IncompleteConfig"
+			cond.Reason = reasonIncompleteConfig
 			cond.Message = "spec.auth.oidc.issuerURL is required for OIDC mode"
 		} else if console.Spec.Auth.OIDC.ClientSecretRef.Name == "" {
 			cond.Status = metav1.ConditionFalse
-			cond.Reason = "IncompleteConfig"
+			cond.Reason = reasonIncompleteConfig
 			cond.Message = "spec.auth.oidc.clientSecretRef is required for OIDC mode"
 		} else if !r.secretExists(ctx, console.Spec.Auth.OIDC.ClientSecretRef.Name) {
 			cond.Status = metav1.ConditionFalse
@@ -689,11 +692,11 @@ func (r *BillingConsoleReconciler) setAuthCondition(ctx context.Context, console
 	case billingv1alpha1.AuthModeBrokered:
 		if console.Spec.Auth.Broker == nil || console.Spec.Auth.Broker.ExistingIssuerURL == "" {
 			cond.Status = metav1.ConditionFalse
-			cond.Reason = "IncompleteConfig"
+			cond.Reason = reasonIncompleteConfig
 			cond.Message = "spec.auth.broker.existingIssuerURL is required for Brokered mode"
 		} else if console.Spec.Auth.OIDC == nil || console.Spec.Auth.OIDC.ClientSecretRef.Name == "" {
 			cond.Status = metav1.ConditionFalse
-			cond.Reason = "IncompleteConfig"
+			cond.Reason = reasonIncompleteConfig
 			cond.Message = "spec.auth.oidc.clientSecretRef is required for Brokered mode (reuses OIDC client credentials)"
 		} else if !r.secretExists(ctx, console.Spec.Auth.OIDC.ClientSecretRef.Name) {
 			cond.Status = metav1.ConditionFalse
