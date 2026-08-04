@@ -725,7 +725,7 @@ func (r *BillingConsoleReconciler) apiAvailable(gvk schema.GroupVersionKind) boo
 
 func consoleLabels() map[string]string {
 	return map[string]string{
-		"app.kubernetes.io/name":       "billing-console",
+		"app.kubernetes.io/name":       consoleResourceName,
 		"app.kubernetes.io/component":  "console",
 		"app.kubernetes.io/managed-by": "platform-billing-operator",
 	}
@@ -733,7 +733,7 @@ func consoleLabels() map[string]string {
 
 func consoleSelectorLabels() map[string]string {
 	return map[string]string{
-		"app.kubernetes.io/name": "billing-console",
+		"app.kubernetes.io/name": consoleResourceName,
 	}
 }
 
