@@ -53,7 +53,7 @@ type DriftJob struct {
 
 // New creates a DriftJob. tolerancePct is parsed as a decimal percentage
 // (default 5); window is how far back each tick looks (default 24h).
-func New(ledger LedgerQuerier, prom PromClient, k8s client.Client, log *slog.Logger, tolerancePct string, window time.Duration) *DriftJob {
+func New(lq LedgerQuerier, prom PromClient, k8s client.Client, log *slog.Logger, tolerancePct string, window time.Duration) *DriftJob {
 	tol, err := decimal.NewFromString(tolerancePct)
 	if err != nil {
 		tol = decimal.NewFromInt(5)
@@ -62,7 +62,7 @@ func New(ledger LedgerQuerier, prom PromClient, k8s client.Client, log *slog.Log
 		window = 24 * time.Hour
 	}
 	return &DriftJob{
-		ledger:       ledger,
+		ledger:       lq,
 		prom:         prom,
 		k8s:          k8s,
 		log:          log,

@@ -100,7 +100,7 @@ func (c *HTTPPromClient) Query(ctx context.Context, query string, ts time.Time) 
 	if err != nil {
 		return nil, fmt.Errorf("prom query: %w", err)
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	var body struct {
 		Status    string `json:"status"`
