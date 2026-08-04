@@ -41,6 +41,9 @@ linters:
       - linters:
           - goconst
         path: _test\.go$
+      - linters:
+          - goconst
+        path: cmd/billctl/
     paths:
       - third_party$
       - builtin$
