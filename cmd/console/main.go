@@ -33,11 +33,11 @@ func main() {
 	}
 
 	// Reverse proxy: /api/* -> ledger-svc /v1/*
-	proxy := httputil.NewSingleHostReverseProxy(target)
-	defaultDirector := proxy.Director
-	proxy.Director = func(r *http.Request) {
-		defaultDirector(r)
-		r.URL.Path = "/v1/" + strings.TrimPrefix(r.URL.Path, "/api/")
+	proxy := &httputil.ReverseProxy{
+		Rewrite: func(r *httputil.ProxyRequest) {
+			r.SetURL(target)
+			r.Out.URL.Path = "/v1/" + strings.TrimPrefix(r.In.URL.Path, "/api/")
+		},
 	}
 
 	// SPA file server with fallback to index.html for client-side routing
@@ -52,7 +52,7 @@ func main() {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
+		w.Write([]byte("ok\n")) //nolint:errcheck
 	})
 	mux.Handle("/", spaHandler)
 
@@ -89,7 +89,7 @@ func spaFileServer(fsys http.FileSystem) http.Handler {
 			return
 		}
 		stat, err := f.Stat()
-		f.Close()
+		_ = f.Close()
 		if err != nil || stat.IsDir() {
 			r.URL.Path = "/"
 			fileServer.ServeHTTP(w, r)
