@@ -1,0 +1,10 @@
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: BillingConsole
+metadata:
+  name: default
+spec:
+  enabled: true
+  image: controller:latest
+  replicas: 1
+  route:
+    host: ""

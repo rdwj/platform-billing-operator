@@ -246,6 +246,20 @@ func main() {
 		os.Exit(1)
 	}
 
+	// --- BillingConsole controller ---
+	consoleNS := os.Getenv("OPERATOR_NAMESPACE")
+	if consoleNS == "" {
+		consoleNS = "platform-billing-operator-system"
+	}
+	if err = (&controller.BillingConsoleReconciler{
+		Client:            mgr.GetClient(),
+		Scheme:            mgr.GetScheme(),
+		OperatorNamespace: consoleNS,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "BillingConsole")
+		os.Exit(1)
+	}
+
 	// --- Ledger-dependent components (balance controller + rating job) ---
 	if dsn := os.Getenv("LEDGER_DSN"); dsn != "" {
 		store, err := ledger.NewStore(context.Background(), dsn)

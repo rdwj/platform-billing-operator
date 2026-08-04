@@ -27,9 +27,34 @@ rules:
   - list
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - services
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - billing.opendatahub.io
   resources:
   - billingconnectors
+  - billingconsoles
   - budgetpolicies
   - plans
   - tenantaccounts
@@ -43,6 +68,7 @@ rules:
   - billing.opendatahub.io
   resources:
   - billingconnectors/status
+  - billingconsoles/status
   - budgetpolicies/status
   - plans/status
   - tenantaccounts/status
@@ -65,6 +91,18 @@ rules:
   verbs:
   - get
   - list
+  - watch
+- apiGroups:
+  - console.openshift.io
+  resources:
+  - consolelinks
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - gateway.networking.k8s.io
@@ -103,3 +141,15 @@ rules:
   - workloads/status
   verbs:
   - get
+- apiGroups:
+  - route.openshift.io
+  resources:
+  - routes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
