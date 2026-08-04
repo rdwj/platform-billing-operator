@@ -682,6 +682,92 @@ func (s *Store) QueryLatestDriftReport(ctx context.Context, tenantID string) (*D
 	return &r, nil
 }
 
+// QueryExportData returns FOCUS 1.2-formatted rows for a tenant's usage within [from, to).
+// Currency is resolved from the charges table; if the tenant has no charges yet, the CROSS JOIN
+// produces zero rows and the caller gets an empty slice (not an error). This is intentional:
+// a valid FOCUS export requires a currency, and usage_hourly rows without rated charges
+// cannot produce one. Aggregates across key_id and geo — the export grain is (sku, quantity_type, hour).
+func (s *Store) QueryExportData(ctx context.Context, tenantID string, from, to time.Time) ([]FOCUSRow, error) {
+	const sql = `
+		WITH tenant_currency AS (
+			SELECT DISTINCT currency FROM charges WHERE tenant_id = $1 LIMIT 1
+		)
+		SELECT uh.sku, uh.quantity_type, uh.hour,
+		       SUM(uh.quantity) AS quantity, SUM(uh.amount) AS amount,
+		       tc.currency
+		FROM usage_hourly uh
+		CROSS JOIN tenant_currency tc
+		WHERE uh.tenant_id = $1 AND uh.hour >= $2 AND uh.hour < $3
+		GROUP BY uh.sku, uh.quantity_type, uh.hour, tc.currency
+		ORDER BY uh.hour, uh.sku, uh.quantity_type`
+
+	rows, err := s.pool.Query(ctx, sql, tenantID, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("query export data: %w", err)
+	}
+	defer rows.Close()
+
+	periodStart := from.UTC().Format(time.RFC3339)
+	periodEnd := to.UTC().Format(time.RFC3339)
+
+	var result []FOCUSRow
+	for rows.Next() {
+		var sku, quantityType, quantityStr, amountStr, currency string
+		var hour time.Time
+		if err := rows.Scan(&sku, &quantityType, &hour, &quantityStr, &amountStr, &currency); err != nil {
+			return nil, fmt.Errorf("scan export row: %w", err)
+		}
+
+		amt, err := decimal.NewFromString(amountStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse amount %q: %w", amountStr, err)
+		}
+		qty, err := decimal.NewFromString(quantityStr)
+		if err != nil {
+			return nil, fmt.Errorf("parse quantity %q: %w", quantityStr, err)
+		}
+
+		billedCost := amt.StringFixed(6)
+		consumedQty := qty.StringFixed(0)
+
+		result = append(result, FOCUSRow{
+			BilledCost:         billedCost,
+			BillingAccountId:   tenantID,
+			BillingAccountName: tenantID,
+			BillingCurrency:    currency,
+			BillingPeriodStart: periodStart,
+			BillingPeriodEnd:   periodEnd,
+			ChargeCategory:     "Usage",
+			ChargeClass:        "",
+			ChargeDescription:  fmt.Sprintf("%s %s", sku, quantityType),
+			ChargePeriodStart:  hour.UTC().Format(time.RFC3339),
+			ChargePeriodEnd:    hour.Add(time.Hour).UTC().Format(time.RFC3339),
+			ContractedCost:     billedCost,
+			EffectiveCost:      billedCost,
+			ConsumedQuantity:   consumedQty,
+			ConsumedUnit:       "Tokens",
+			ListCost:           billedCost,
+			PricingQuantity:    consumedQty,
+			PricingUnit:        "Tokens",
+			Provider:           "platform-billing-operator",
+			Publisher:          "platform-billing-operator",
+			ResourceId:         sku,
+			ResourceName:       sku,
+			ServiceCategory:    "AI and Machine Learning",
+			ServiceName:        "Models as a Service",
+			SkuId:              sku,
+			SkuMeter:           quantityType,
+			SubAccountId:       tenantID,
+			SubAccountName:     tenantID,
+			ChargeFrequency:    "Usage-Based",
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate export rows: %w", err)
+	}
+	return result, nil
+}
+
 func splitPageToken(token string) []string {
 	idx := strings.LastIndex(token, "|")
 	if idx < 0 {

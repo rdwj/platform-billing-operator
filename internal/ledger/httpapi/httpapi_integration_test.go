@@ -4,6 +4,7 @@ package httpapi_test
 
 import (
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -416,4 +417,154 @@ func makeEvent(t *testing.T, fields map[string]any) json.RawMessage {
 	data, err := json.Marshal(fields)
 	require.NoError(t, err)
 	return json.RawMessage(data)
+}
+
+// ---------------------------------------------------------------------------
+// FOCUS 1.2 export endpoint tests
+// ---------------------------------------------------------------------------
+
+func TestExportMissingParams(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+	}{
+		{"missing tenant", "/v1/export?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z"},
+		{"missing from", "/v1/export?tenant=t&to=2026-12-31T00:00:00Z"},
+		{"missing to", "/v1/export?tenant=t&from=2026-01-01T00:00:00Z"},
+		{"invalid from", "/v1/export?tenant=t&from=not-a-date&to=2026-12-31T00:00:00Z"},
+		{"invalid to", "/v1/export?tenant=t&from=2026-01-01T00:00:00Z&to=not-a-date"},
+		{"from after to", "/v1/export?tenant=t&from=2026-12-31T00:00:00Z&to=2026-01-01T00:00:00Z"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp, err := http.Get(testServer.URL + tt.url)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+			require.Equal(t, http.StatusBadRequest, resp.StatusCode)
+		})
+	}
+}
+
+func TestExportEmptyTenant(t *testing.T) {
+	resp, err := http.Get(testServer.URL + "/v1/export?tenant=nonexistent-export-tenant&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Empty(t, body.Rows)
+}
+
+func TestExportJSONWithData(t *testing.T) {
+	ctx := context.Background()
+	tenantID := "ten-export-test"
+
+	// Insert a charge row (needed for currency resolution via tenant_currency CTE).
+	_, err := testPool.Exec(ctx, `
+		INSERT INTO charges (record_id, tenant_id, price_book, price_book_rev,
+			amount, currency, components, rated_at)
+		VALUES ('req-export-001', $1, 'pb-standard', 1, '0.010000', 'USD', '[]', '2026-08-01T10:00:00Z')
+		ON CONFLICT (record_id) DO NOTHING`, tenantID)
+	require.NoError(t, err)
+
+	// Insert two usage_hourly rows: different quantity types, same hour.
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO usage_hourly (tenant_id, key_id, sku, geo, quantity_type, hour, quantity, amount)
+		VALUES
+			($1, '', 'gpt-4o', '', 'prompt_tokens',     '2026-08-01T10:00:00Z', 500, '0.001250'),
+			($1, '', 'gpt-4o', '', 'completion_tokens',  '2026-08-01T10:00:00Z', 200, '0.002000')
+		ON CONFLICT DO NOTHING`, tenantID)
+	require.NoError(t, err)
+
+	resp, err := http.Get(testServer.URL + "/v1/export?tenant=" + tenantID +
+		"&from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Len(t, body.Rows, 2, "expect 2 rows (one per quantity_type)")
+
+	// Rows are ordered by hour, sku, quantity_type — so completion_tokens < prompt_tokens.
+	ct := body.Rows[0]
+	require.Equal(t, "0.002000", ct["BilledCost"])
+	require.Equal(t, tenantID, ct["BillingAccountId"])
+	require.Equal(t, "USD", ct["BillingCurrency"])
+	require.Equal(t, "Usage", ct["ChargeCategory"])
+	require.Equal(t, "200", ct["ConsumedQuantity"])
+	require.Equal(t, "Tokens", ct["ConsumedUnit"])
+	require.Equal(t, "gpt-4o", ct["SkuId"])
+	require.Equal(t, "completion_tokens", ct["SkuMeter"])
+	require.Equal(t, "AI and Machine Learning", ct["ServiceCategory"])
+	require.Equal(t, "Usage-Based", ct["ChargeFrequency"])
+
+	// Verify money-format pattern for all cost columns.
+	moneyPattern := `^-?\d{1,12}\.\d{6}$`
+	for _, col := range []string{"BilledCost", "ContractedCost", "EffectiveCost", "ListCost"} {
+		require.Regexp(t, moneyPattern, ct[col].(string), "%s must match Money pattern", col)
+	}
+}
+
+func TestExportCSVMatchesJSON(t *testing.T) {
+	tenantID := "ten-export-test" // reuses data seeded by TestExportJSONWithData
+
+	// Fetch JSON for comparison baseline.
+	jsonResp, err := http.Get(testServer.URL + "/v1/export?tenant=" + tenantID +
+		"&from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z")
+	require.NoError(t, err)
+	defer jsonResp.Body.Close()
+	require.Equal(t, http.StatusOK, jsonResp.StatusCode)
+
+	var jsonBody struct {
+		Rows []map[string]any `json:"rows"`
+	}
+	require.NoError(t, json.NewDecoder(jsonResp.Body).Decode(&jsonBody))
+	require.NotEmpty(t, jsonBody.Rows, "JSON baseline must have data (seeded by TestExportJSONWithData)")
+
+	// Fetch CSV.
+	csvResp, err := http.Get(testServer.URL + "/v1/export?tenant=" + tenantID +
+		"&from=2026-08-01T00:00:00Z&to=2026-08-02T00:00:00Z&format=csv")
+	require.NoError(t, err)
+	defer csvResp.Body.Close()
+	require.Equal(t, http.StatusOK, csvResp.StatusCode)
+	require.Contains(t, csvResp.Header.Get("Content-Type"), "text/csv")
+
+	csvBody, err := io.ReadAll(csvResp.Body)
+	require.NoError(t, err)
+
+	reader := csv.NewReader(strings.NewReader(string(csvBody)))
+	records, err := reader.ReadAll()
+	require.NoError(t, err)
+	require.True(t, len(records) >= 3, "CSV should have header + 2 data rows, got %d lines", len(records))
+
+	// Header row must match FOCUSCSVHeader.
+	expectedHeader := ledger.FOCUSCSVHeader()
+	require.Equal(t, expectedHeader, records[0], "CSV header must match ledger.FOCUSCSVHeader()")
+
+	// Build a column-index map for CSV lookup.
+	colIdx := make(map[string]int, len(expectedHeader))
+	for i, h := range expectedHeader {
+		colIdx[h] = i
+	}
+
+	// Verify first CSV data row matches corresponding JSON row.
+	csvRow := records[1]
+	jsonRow := jsonBody.Rows[0]
+	for _, col := range []string{"BilledCost", "SkuId", "SkuMeter", "BillingCurrency", "ChargeCategory"} {
+		idx, ok := colIdx[col]
+		require.True(t, ok, "column %s must exist in header", col)
+		require.Equal(t, jsonRow[col].(string), csvRow[idx],
+			"CSV %s should match JSON value", col)
+	}
+
+	// Verify correct number of data rows.
+	require.Equal(t, len(jsonBody.Rows), len(records)-1,
+		"CSV data rows should match JSON row count")
 }
