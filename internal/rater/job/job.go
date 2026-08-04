@@ -94,7 +94,8 @@ func (j *RatingJob) Tick(ctx context.Context) (int, error) {
 	}
 
 	if rated > 0 {
-		metrics.EventsRatedTotal.Add(float64(rated))
+		n := float64(rated)
+		metrics.EventsRatedTotal.Add(n)
 		j.log.Info("rated events", "count", rated, "batch", len(events))
 	}
 	return rated, nil
