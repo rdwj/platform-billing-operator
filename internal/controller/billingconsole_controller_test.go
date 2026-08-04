@@ -41,6 +41,9 @@ var _ = Describe("BillingConsole Controller", Serial, Ordered, func() {
 	svcKey := types.NamespacedName{Name: "billing-console", Namespace: "default"}
 	crKey := types.NamespacedName{Name: "default"}
 
+	saKey := types.NamespacedName{Name: "billing-console", Namespace: "default"}
+	cookieKey := types.NamespacedName{Name: "billing-console-oauth", Namespace: "default"}
+
 	cleanupConsole := func() {
 		cr := &billingv1alpha1.BillingConsole{}
 		if err := k8sClient.Get(ctx, crKey, cr); err == nil {
@@ -62,6 +65,14 @@ var _ = Describe("BillingConsole Controller", Serial, Ordered, func() {
 			Eventually(func() bool {
 				return apierrors.IsNotFound(k8sClient.Get(ctx, svcKey, svc))
 			}, timeout, interval).Should(BeTrue())
+		}
+		sa := &corev1.ServiceAccount{}
+		if err := k8sClient.Get(ctx, saKey, sa); err == nil {
+			k8sClient.Delete(ctx, sa) //nolint:errcheck
+		}
+		secret := &corev1.Secret{}
+		if err := k8sClient.Get(ctx, cookieKey, secret); err == nil {
+			k8sClient.Delete(ctx, secret) //nolint:errcheck
 		}
 	}
 
@@ -177,6 +188,226 @@ var _ = Describe("BillingConsole Controller", Serial, Ordered, func() {
 			g.Expect(cond).NotTo(BeNil())
 			g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
 			g.Expect(cond.Reason).To(Equal("InvalidName"))
+		}, timeout, interval).Should(Succeed())
+	})
+
+	It("should add oauth-proxy sidecar for OpenShiftOAuth mode", func() {
+		console := &billingv1alpha1.BillingConsole{
+			ObjectMeta: metav1.ObjectMeta{Name: "default"},
+			Spec: billingv1alpha1.BillingConsoleSpec{
+				Enabled: ptr.To(true),
+				Image:   "quay.io/test/console:v1",
+				Auth: &billingv1alpha1.ConsoleAuthConfig{
+					Mode: billingv1alpha1.AuthModeOpenShiftOAuth,
+					Roles: &billingv1alpha1.ConsoleRoles{
+						Admin: []string{"billing-admins"},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, console)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var dep appsv1.Deployment
+			g.Expect(k8sClient.Get(ctx, depKey, &dep)).To(Succeed())
+			g.Expect(dep.Spec.Template.Spec.Containers).To(HaveLen(2))
+
+			var consoleC, proxyC corev1.Container
+			for _, c := range dep.Spec.Template.Spec.Containers {
+				switch c.Name {
+				case "console":
+					consoleC = c
+				case "oauth-proxy":
+					proxyC = c
+				}
+			}
+
+			g.Expect(proxyC.Image).To(Equal("registry.redhat.io/openshift4/ose-oauth-proxy:latest"))
+			g.Expect(proxyC.Ports).To(HaveLen(1))
+			g.Expect(proxyC.Ports[0].ContainerPort).To(Equal(int32(4180)))
+
+			envMap := envVarMap(consoleC.Env)
+			g.Expect(envMap).To(HaveKeyWithValue("AUTH_MODE", "openshift-oauth"))
+			g.Expect(envMap).To(HaveKeyWithValue("CONSOLE_ROLES_ADMIN", "billing-admins"))
+
+			g.Expect(dep.Spec.Template.Spec.ServiceAccountName).To(Equal("billing-console"))
+			g.Expect(dep.Spec.Template.Spec.Volumes).To(HaveLen(1))
+			g.Expect(dep.Spec.Template.Spec.Volumes[0].Name).To(Equal("oauth-cookie"))
+		}, timeout, interval).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			var sa corev1.ServiceAccount
+			g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: "billing-console", Namespace: "default",
+			}, &sa)).To(Succeed())
+			g.Expect(sa.Annotations).To(HaveKey("serviceaccounts.openshift.io/oauth-redirectreference.primary"))
+			g.Expect(sa.OwnerReferences).To(HaveLen(1))
+		}, timeout, interval).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			var secret corev1.Secret
+			g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+				Name: "billing-console-oauth", Namespace: "default",
+			}, &secret)).To(Succeed())
+			g.Expect(secret.Data).To(HaveKey("cookie-secret"))
+			g.Expect(secret.OwnerReferences).To(HaveLen(1))
+		}, timeout, interval).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			var svc corev1.Service
+			g.Expect(k8sClient.Get(ctx, svcKey, &svc)).To(Succeed())
+			g.Expect(svc.Spec.Ports[0].TargetPort.String()).To(Equal("oauth-proxy"))
+		}, timeout, interval).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			var fetched billingv1alpha1.BillingConsole
+			g.Expect(k8sClient.Get(ctx, crKey, &fetched)).To(Succeed())
+			cond := apimeta.FindStatusCondition(fetched.Status.Conditions,
+				billingv1alpha1.ConditionAuthConfigured)
+			g.Expect(cond).NotTo(BeNil())
+			g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			g.Expect(cond.Reason).To(Equal("Configured"))
+		}, timeout, interval).Should(Succeed())
+	})
+
+	It("should inject OIDC env vars for OIDC mode", func() {
+		oidcSecret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "my-oidc-creds", Namespace: "default"},
+			Data: map[string][]byte{
+				"client-id":     []byte("test-client"),
+				"client-secret": []byte("test-secret"),
+			},
+		}
+		Expect(k8sClient.Create(ctx, oidcSecret)).To(Succeed())
+		DeferCleanup(func() {
+			k8sClient.Delete(ctx, oidcSecret) //nolint:errcheck
+		})
+
+		console := &billingv1alpha1.BillingConsole{
+			ObjectMeta: metav1.ObjectMeta{Name: "default"},
+			Spec: billingv1alpha1.BillingConsoleSpec{
+				Enabled: ptr.To(true),
+				Image:   "quay.io/test/console:v1",
+				Auth: &billingv1alpha1.ConsoleAuthConfig{
+					Mode: billingv1alpha1.AuthModeOIDC,
+					OIDC: &billingv1alpha1.OIDCConfig{
+						IssuerURL:       "https://idp.example.com",
+						ClientSecretRef: corev1.LocalObjectReference{Name: "my-oidc-creds"},
+						GroupsClaim:     "roles",
+					},
+					Roles: &billingv1alpha1.ConsoleRoles{
+						Admin:    []string{"admins"},
+						Operator: []string{"ops"},
+						Viewer:   []string{"readers"},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, console)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var dep appsv1.Deployment
+			g.Expect(k8sClient.Get(ctx, depKey, &dep)).To(Succeed())
+			g.Expect(dep.Spec.Template.Spec.Containers).To(HaveLen(1))
+
+			c := dep.Spec.Template.Spec.Containers[0]
+			envMap := envVarMap(c.Env)
+			g.Expect(envMap).To(HaveKeyWithValue("AUTH_MODE", "oidc"))
+			g.Expect(envMap).To(HaveKeyWithValue("OIDC_ISSUER_URL", "https://idp.example.com"))
+			g.Expect(envMap).To(HaveKeyWithValue("OIDC_GROUPS_CLAIM", "roles"))
+			g.Expect(envMap).To(HaveKeyWithValue("CONSOLE_ROLES_ADMIN", "admins"))
+			g.Expect(envMap).To(HaveKeyWithValue("CONSOLE_ROLES_OPERATOR", "ops"))
+			g.Expect(envMap).To(HaveKeyWithValue("CONSOLE_ROLES_VIEWER", "readers"))
+
+			// OIDC_CLIENT_ID should use SecretKeyRef, not a plain value
+			var clientIDEnv *corev1.EnvVar
+			for i := range c.Env {
+				if c.Env[i].Name == "OIDC_CLIENT_ID" {
+					clientIDEnv = &c.Env[i]
+					break
+				}
+			}
+			g.Expect(clientIDEnv).NotTo(BeNil())
+			g.Expect(clientIDEnv.ValueFrom).NotTo(BeNil())
+			g.Expect(clientIDEnv.ValueFrom.SecretKeyRef.Name).To(Equal("my-oidc-creds"))
+			g.Expect(clientIDEnv.ValueFrom.SecretKeyRef.Key).To(Equal("client-id"))
+
+			g.Expect(dep.Spec.Template.Spec.ServiceAccountName).To(BeEmpty())
+			g.Expect(dep.Spec.Template.Spec.Volumes).To(BeEmpty())
+		}, timeout, interval).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			var fetched billingv1alpha1.BillingConsole
+			g.Expect(k8sClient.Get(ctx, crKey, &fetched)).To(Succeed())
+			cond := apimeta.FindStatusCondition(fetched.Status.Conditions,
+				billingv1alpha1.ConditionAuthConfigured)
+			g.Expect(cond).NotTo(BeNil())
+			g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+			g.Expect(cond.Reason).To(Equal("Configured"))
+		}, timeout, interval).Should(Succeed())
+	})
+
+	It("should set AuthConfigured=False when OIDC Secret is missing", func() {
+		console := &billingv1alpha1.BillingConsole{
+			ObjectMeta: metav1.ObjectMeta{Name: "default"},
+			Spec: billingv1alpha1.BillingConsoleSpec{
+				Enabled: ptr.To(true),
+				Auth: &billingv1alpha1.ConsoleAuthConfig{
+					Mode: billingv1alpha1.AuthModeOIDC,
+					OIDC: &billingv1alpha1.OIDCConfig{
+						IssuerURL:       "https://idp.example.com",
+						ClientSecretRef: corev1.LocalObjectReference{Name: "nonexistent-secret"},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, console)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var fetched billingv1alpha1.BillingConsole
+			g.Expect(k8sClient.Get(ctx, crKey, &fetched)).To(Succeed())
+			cond := apimeta.FindStatusCondition(fetched.Status.Conditions,
+				billingv1alpha1.ConditionAuthConfigured)
+			g.Expect(cond).NotTo(BeNil())
+			g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			g.Expect(cond.Reason).To(Equal("SecretNotFound"))
+		}, timeout, interval).Should(Succeed())
+
+		// Deployment should serve unauthenticated when auth config is incomplete
+		Eventually(func(g Gomega) {
+			var dep appsv1.Deployment
+			g.Expect(k8sClient.Get(ctx, depKey, &dep)).To(Succeed())
+			envMap := envVarMap(dep.Spec.Template.Spec.Containers[0].Env)
+			g.Expect(envMap).NotTo(HaveKey("AUTH_MODE"))
+		}, timeout, interval).Should(Succeed())
+	})
+
+	It("should set AuthConfigured=False with NotConfigured when no auth is set", func() {
+		console := &billingv1alpha1.BillingConsole{
+			ObjectMeta: metav1.ObjectMeta{Name: "default"},
+			Spec: billingv1alpha1.BillingConsoleSpec{
+				Enabled: ptr.To(true),
+				Image:   "quay.io/test/console:v1",
+			},
+		}
+		Expect(k8sClient.Create(ctx, console)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var fetched billingv1alpha1.BillingConsole
+			g.Expect(k8sClient.Get(ctx, crKey, &fetched)).To(Succeed())
+			cond := apimeta.FindStatusCondition(fetched.Status.Conditions,
+				billingv1alpha1.ConditionAuthConfigured)
+			g.Expect(cond).NotTo(BeNil())
+			g.Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+			g.Expect(cond.Reason).To(Equal("NotConfigured"))
+		}, timeout, interval).Should(Succeed())
+
+		Eventually(func(g Gomega) {
+			var dep appsv1.Deployment
+			g.Expect(k8sClient.Get(ctx, depKey, &dep)).To(Succeed())
+			c := dep.Spec.Template.Spec.Containers[0]
+			envMap := envVarMap(c.Env)
+			g.Expect(envMap).NotTo(HaveKey("AUTH_MODE"))
 		}, timeout, interval).Should(Succeed())
 	})
 

@@ -24,6 +24,7 @@ import (
 const (
 	ConditionConsoleDeployed      = "Deployed"
 	ConditionConsoleRouteAdmitted = "RouteAdmitted"
+	ConditionAuthConfigured       = "AuthConfigured"
 
 	AuthModeOpenShiftOAuth = "OpenShiftOAuth"
 	AuthModeOIDC           = "OIDC"
@@ -50,6 +51,7 @@ type OIDCConfig struct {
 	IssuerURL string `json:"issuerURL"`
 
 	// ClientSecretRef references a Secret containing the OIDC client credentials.
+	// Expected keys: "client-id" and "client-secret".
 	// +kubebuilder:validation:Required
 	ClientSecretRef corev1.LocalObjectReference `json:"clientSecretRef"`
 

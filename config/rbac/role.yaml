@@ -21,7 +21,6 @@ rules:
   - ""
   resources:
   - nodes
-  - secrets
   verbs:
   - get
   - list
@@ -29,6 +28,8 @@ rules:
 - apiGroups:
   - ""
   resources:
+  - secrets
+  - serviceaccounts
   - services
   verbs:
   - create

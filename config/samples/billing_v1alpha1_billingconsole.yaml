@@ -8,3 +8,35 @@ spec:
   replicas: 1
   route:
     host: ""
+  # --- Auth configuration (choose one mode) ---
+  # OpenShift OAuth (provider staff via cluster OAuth):
+  # auth:
+  #   mode: OpenShiftOAuth
+  #   roles:
+  #     admin: ["billing-admins"]
+  #     operator: ["billing-ops"]
+  #     viewer: ["finance-ro"]
+  #
+  # OIDC (customer's IdP — Entra ID, Okta, Keycloak, etc.):
+  # auth:
+  #   mode: OIDC
+  #   oidc:
+  #     issuerURL: https://login.example.com/realms/billing
+  #     clientSecretRef:
+  #       name: billing-console-oidc  # Secret with keys: client-id, client-secret
+  #     groupsClaim: groups
+  #   roles:
+  #     admin: ["billing-admins"]
+  #     operator: ["billing-ops"]
+  #     viewer: ["finance-ro"]
+  #
+  # Brokered (federated IdP via external broker):
+  # auth:
+  #   mode: Brokered
+  #   broker:
+  #     existingIssuerURL: https://sso.example.com/realms/billing
+  #   oidc:
+  #     clientSecretRef:
+  #       name: billing-console-oidc  # reuses OIDC client credentials
+  #   roles:
+  #     admin: ["billing-admins"]

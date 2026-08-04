@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/rdwj/platform-billing-operator/cmd/console/authn"
 	"github.com/rdwj/platform-billing-operator/console"
 )
 
@@ -47,8 +48,17 @@ func main() {
 	}
 	spaHandler := spaFileServer(http.FS(distFS))
 
+	authMode := os.Getenv("AUTH_MODE")
+	auth, err := authn.New(context.Background(), authn.Config{
+		Mode:       authMode,
+		RoleConfig: authn.ParseRoleConfig(),
+	})
+	if err != nil {
+		log.Fatalf("auth init: %v", err)
+	}
+
 	mux := http.NewServeMux()
-	mux.Handle("/api/", proxy)
+	mux.Handle("/api/", auth.Middleware(proxy))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)

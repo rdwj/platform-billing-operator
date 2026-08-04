@@ -78,8 +78,9 @@ spec:
                     description: OIDC configures OIDC authentication.
                     properties:
                       clientSecretRef:
-                        description: ClientSecretRef references a Secret containing
-                          the OIDC client credentials.
+                        description: |-
+                          ClientSecretRef references a Secret containing the OIDC client credentials.
+                          Expected keys: "client-id" and "client-secret".
                         properties:
                           name:
                             default: ""
