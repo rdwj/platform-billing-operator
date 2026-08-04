@@ -445,10 +445,10 @@ func (r *PlanReconciler) buildDesiredAuthPolicy(plan *billingv1alpha1.Plan) *uns
 	}
 	celPredicate := strings.Join(parts, " || ")
 
-	targetRef := map[string]interface{}{ //nolint:goconst // K8s API field names
+	targetRef := map[string]interface{}{
 		"group": string(plan.Spec.TargetRef.Group),
-		"kind":  string(plan.Spec.TargetRef.Kind),
-		"name":  string(plan.Spec.TargetRef.Name),
+		"kind":  string(plan.Spec.TargetRef.Kind), //nolint:goconst // K8s API field name
+		"name":  string(plan.Spec.TargetRef.Name), //nolint:goconst // K8s API field name
 	}
 	if plan.Spec.TargetRef.SectionName != nil {
 		targetRef["sectionName"] = string(*plan.Spec.TargetRef.SectionName)

@@ -10,12 +10,21 @@ import (
 	"github.com/coreos/go-oidc/v3/oidc"
 )
 
+const (
+	ModeOIDC           = "oidc"
+	ModeOpenShiftOAuth = "openshift-oauth"
+
+	RoleAdmin    = "admin"
+	RoleOperator = "operator"
+	RoleViewer   = "viewer"
+)
+
 type contextKey struct{}
 
 type ConsoleIdentity struct {
 	User   string
 	Groups []string
-	Role   string // "admin", "operator", "viewer", or ""
+	Role   string // RoleAdmin, RoleOperator, RoleViewer, or ""
 }
 
 type RoleConfig struct {
@@ -37,7 +46,7 @@ type Authenticator struct {
 func New(ctx context.Context, cfg Config) (*Authenticator, error) {
 	a := &Authenticator{cfg: cfg}
 
-	if cfg.Mode == "oidc" {
+	if cfg.Mode == ModeOIDC {
 		issuer := os.Getenv("OIDC_ISSUER_URL")
 		if issuer == "" {
 			return nil, fmt.Errorf("OIDC_ISSUER_URL is required when AUTH_MODE=oidc")
@@ -72,9 +81,9 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 		var err error
 
 		switch a.cfg.Mode {
-		case "oidc":
+		case ModeOIDC:
 			id, err = a.identityFromJWT(r)
-		case "openshift-oauth":
+		case ModeOpenShiftOAuth:
 			id, err = identityFromHeaders(r)
 		}
 
@@ -166,17 +175,17 @@ func (rc RoleConfig) ResolveRole(groups []string) string {
 
 	for _, admin := range rc.Admin {
 		if _, ok := groupSet[admin]; ok {
-			return "admin"
+			return RoleAdmin
 		}
 	}
 	for _, op := range rc.Operator {
 		if _, ok := groupSet[op]; ok {
-			return "operator"
+			return RoleOperator
 		}
 	}
 	for _, v := range rc.Viewer {
 		if _, ok := groupSet[v]; ok {
-			return "viewer"
+			return RoleViewer
 		}
 	}
 	return ""

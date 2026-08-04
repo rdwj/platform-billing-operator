@@ -13,9 +13,9 @@ func RequireProviderRole(next http.Handler) http.Handler {
 		}
 
 		switch identity.Role {
-		case "admin", "operator":
+		case RoleAdmin, RoleOperator:
 			next.ServeHTTP(w, r)
-		case "viewer":
+		case RoleViewer:
 			if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
 				next.ServeHTTP(w, r)
 				return

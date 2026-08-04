@@ -74,7 +74,7 @@ type BillingConsoleReconciler struct {
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=console.openshift.io,resources=consolelinks,verbs=get;list;watch;create;update;patch;delete
 
-func (r *BillingConsoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *BillingConsoleReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) { //nolint:gocyclo // orchestration function with many sub-reconcilers
 	logger := log.FromContext(ctx)
 
 	var console billingv1alpha1.BillingConsole
@@ -481,9 +481,9 @@ func (r *BillingConsoleReconciler) reconcileRoute(ctx context.Context, console *
 		route.SetLabels(consoleLabels())
 
 		spec := map[string]interface{}{
-			"to": map[string]interface{}{ //nolint:goconst // K8s API field names
-				"kind":   "Service",
-				"name":   consoleResourceName,
+			"to": map[string]interface{}{
+				"kind":   "Service",           //nolint:goconst // K8s API field name
+				"name":   consoleResourceName, //nolint:goconst // K8s API field name
 				"weight": int64(100),
 			},
 			"port": map[string]interface{}{
