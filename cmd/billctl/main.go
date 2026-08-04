@@ -26,6 +26,7 @@ func main() {
 	rootCmd.AddCommand(budgetCmd())
 	rootCmd.AddCommand(driftCmd())
 	rootCmd.AddCommand(exportCmd())
+	rootCmd.AddCommand(invoicesCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

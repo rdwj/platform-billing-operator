@@ -577,3 +577,133 @@ func TestExportCSVMatchesJSON(t *testing.T) {
 	require.Equal(t, len(jsonBody.Rows), len(records)-1,
 		"CSV data rows should match JSON row count")
 }
+
+// ---------------------------------------------------------------------------
+// Invoice endpoint tests
+// ---------------------------------------------------------------------------
+
+func TestInvoiceFinalizationAndHTTPRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	tenantID := "ten-invoice-test"
+
+	// Seed usage event + charge for August 2026.
+	_, err := testPool.Exec(ctx, `
+		INSERT INTO usage_events (record_id, tenant_id, sku, profile, collector,
+			prompt_tokens, completion_tokens, quantities, status, content_hash, event_ts)
+		VALUES ('req-inv-001', $1, 'gpt-4o', 'maas', 'test',
+			1000, 500, '{"prompt_tokens":1000,"completion_tokens":500}', 'ok', 'hash-inv-001', '2026-08-15T10:00:00Z')
+		ON CONFLICT (record_id) DO NOTHING`, tenantID)
+	require.NoError(t, err)
+
+	_, err = testPool.Exec(ctx, `
+		INSERT INTO charges (record_id, tenant_id, price_book, price_book_rev,
+			amount, currency, components, rated_at)
+		VALUES ('req-inv-001', $1, 'pb-standard', 1, '0.025000', 'USD', '[]', '2026-08-15T10:00:00Z')
+		ON CONFLICT (record_id) DO NOTHING`, tenantID)
+	require.NoError(t, err)
+
+	// Finalize invoice for 2026-08.
+	inv, created, err := testStore.FinalizeInvoice(ctx, tenantID, "2026-08")
+	require.NoError(t, err)
+	require.True(t, created, "first finalization should return created=true")
+	require.Equal(t, "finalized", inv.Status)
+	require.Equal(t, "0.025000", inv.Total)
+	require.NotEmpty(t, inv.InvoiceID)
+
+	// Test idempotent re-finalization.
+	inv2, created2, err := testStore.FinalizeInvoice(ctx, tenantID, "2026-08")
+	require.NoError(t, err)
+	require.False(t, created2, "re-finalization should return created=false")
+	require.Equal(t, inv.InvoiceID, inv2.InvoiceID, "idempotent re-finalization returns same invoice")
+	require.Equal(t, "finalized", inv2.Status)
+	require.Equal(t, "0.025000", inv2.Total, "re-finalization should return full invoice data")
+
+	// HTTP: list invoices.
+	listResp, err := http.Get(testServer.URL + "/v1/invoices?tenant=" + tenantID)
+	require.NoError(t, err)
+	defer listResp.Body.Close()
+	require.Equal(t, http.StatusOK, listResp.StatusCode)
+
+	var listBody struct {
+		Invoices []map[string]any `json:"invoices"`
+	}
+	require.NoError(t, json.NewDecoder(listResp.Body).Decode(&listBody))
+	require.Len(t, listBody.Invoices, 1)
+	require.Equal(t, tenantID, listBody.Invoices[0]["tenant_id"])
+	require.Equal(t, "2026-08", listBody.Invoices[0]["period"])
+	require.Equal(t, "finalized", listBody.Invoices[0]["status"])
+	require.Equal(t, "0.025000", listBody.Invoices[0]["total"])
+
+	// HTTP: get invoice with lines.
+	invoiceID := listBody.Invoices[0]["invoice_id"].(string)
+	getResp, err := http.Get(testServer.URL + "/v1/invoices/" + invoiceID)
+	require.NoError(t, err)
+	defer getResp.Body.Close()
+	require.Equal(t, http.StatusOK, getResp.StatusCode)
+
+	var getBody map[string]any
+	require.NoError(t, json.NewDecoder(getResp.Body).Decode(&getBody))
+	require.Equal(t, invoiceID, getBody["invoice_id"])
+	lines, ok := getBody["lines"].([]any)
+	require.True(t, ok)
+	require.NotEmpty(t, lines, "invoice should have at least one line item")
+
+	line := lines[0].(map[string]any)
+	require.Equal(t, "gpt-4o", line["sku"])
+	require.Equal(t, "0.025000", line["amount"])
+
+	// Money pattern check.
+	moneyPattern := `^-?\d{1,12}\.\d{6}$`
+	require.Regexp(t, moneyPattern, getBody["total"].(string))
+
+	// HTTP: get non-existent invoice returns 404.
+	notFoundResp, err := http.Get(testServer.URL + "/v1/invoices/00000000-0000-0000-0000-000000000000")
+	require.NoError(t, err)
+	defer notFoundResp.Body.Close()
+	require.Equal(t, http.StatusNotFound, notFoundResp.StatusCode)
+
+	// HTTP: list without tenant returns 400.
+	badResp, err := http.Get(testServer.URL + "/v1/invoices")
+	require.NoError(t, err)
+	defer badResp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, badResp.StatusCode)
+}
+
+func TestInvoiceStatusGuardTrigger(t *testing.T) {
+	ctx := context.Background()
+
+	// Insert a finalized invoice directly.
+	_, err := testPool.Exec(ctx, `
+		INSERT INTO invoices (invoice_id, tenant_id, period, status, total, finalized_at)
+		VALUES ('11111111-1111-1111-1111-111111111111', 'ten-guard-test', '2026-07', 'finalized', '100.000000', now())
+		ON CONFLICT DO NOTHING`)
+	require.NoError(t, err)
+
+	// Attempt backward transition: finalized -> accruing (should fail).
+	_, err = testPool.Exec(ctx, `
+		UPDATE invoices SET status = 'accruing'
+		WHERE invoice_id = '11111111-1111-1111-1111-111111111111'`)
+	require.Error(t, err, "backward transition from finalized to accruing should be rejected")
+	require.Contains(t, err.Error(), "cannot return to accruing")
+
+	// Attempt DELETE (should fail).
+	_, err = testPool.Exec(ctx, `
+		DELETE FROM invoices WHERE invoice_id = '11111111-1111-1111-1111-111111111111'`)
+	require.Error(t, err, "DELETE on invoices should be rejected")
+	require.Contains(t, err.Error(), "never deleted")
+
+	// Forward transition: finalized -> pushed (should succeed).
+	_, err = testPool.Exec(ctx, `
+		UPDATE invoices SET status = 'pushed'
+		WHERE invoice_id = '11111111-1111-1111-1111-111111111111'`)
+	require.NoError(t, err, "forward transition from finalized to pushed should succeed")
+}
+
+func TestInvoiceEmptyTenant(t *testing.T) {
+	// Finalize for a tenant with no charges — should produce a zero-total invoice.
+	inv, created, err := testStore.FinalizeInvoice(context.Background(), "ten-empty-invoice", "2026-06")
+	require.NoError(t, err)
+	require.True(t, created)
+	require.Equal(t, "finalized", inv.Status)
+	require.Equal(t, "0.000000", inv.Total)
+}

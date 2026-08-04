@@ -768,6 +768,241 @@ func (s *Store) QueryExportData(ctx context.Context, tenantID string, from, to t
 	return result, nil
 }
 
+// FinalizeInvoice creates or finalizes an invoice for a tenant+period.
+// Idempotent: if the invoice is already finalized (or later), it is returned as-is
+// with created=false. Returns created=true only when the invoice was newly finalized.
+func (s *Store) FinalizeInvoice(ctx context.Context, tenantID, period string) (inv *Invoice, created bool, err error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	// Parse period "2026-08" -> time range
+	periodStart, err := time.Parse("2006-01", period)
+	if err != nil {
+		return nil, false, fmt.Errorf("parse period %q: %w", period, err)
+	}
+	periodEnd := periodStart.AddDate(0, 1, 0)
+
+	// Upsert accruing invoice -- skip if already finalized
+	var invoiceID string
+	var status string
+	err = tx.QueryRow(ctx, `
+		INSERT INTO invoices (tenant_id, period, status, total)
+		VALUES ($1, $2, 'accruing', 0)
+		ON CONFLICT (tenant_id, period) DO NOTHING
+		RETURNING invoice_id, status`, tenantID, period,
+	).Scan(&invoiceID, &status)
+
+	if err == pgx.ErrNoRows {
+		// Row already exists -- fetch it
+		var existing Invoice
+		var pspRef *string
+		err = tx.QueryRow(ctx, `
+			SELECT invoice_id, tenant_id, period, status, total, psp_ref, finalized_at
+			FROM invoices
+			WHERE tenant_id = $1 AND period = $2`, tenantID, period,
+		).Scan(&existing.InvoiceID, &existing.TenantID, &existing.Period,
+			&existing.Status, &existing.Total, &pspRef, &existing.FinalizedAt)
+		if err != nil {
+			return nil, false, fmt.Errorf("fetch existing invoice: %w", err)
+		}
+		if pspRef != nil {
+			existing.PSPRef = *pspRef
+		}
+		if existing.Status != "accruing" {
+			tx.Rollback(ctx) //nolint:errcheck
+			return &existing, false, nil
+		}
+		invoiceID = existing.InvoiceID
+		status = existing.Status
+	} else if err != nil {
+		return nil, false, fmt.Errorf("upsert invoice: %w", err)
+	}
+
+	// Clear old lines (idempotent on re-run while still accruing)
+	_, err = tx.Exec(ctx, `DELETE FROM invoice_lines WHERE invoice_id = $1`, invoiceID)
+	if err != nil {
+		return nil, false, fmt.Errorf("clear invoice lines: %w", err)
+	}
+
+	// Aggregate charges into line items — collect first, then insert
+	// (pgx doesn't support concurrent queries on the same connection).
+	type lineData struct {
+		sku, geo, quantityType string
+		quantity, eventCount   int64
+		amount                 decimal.Decimal
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT COALESCE(ue.sku, 'unknown'), COALESCE(ue.geo, ''),
+		       COALESCE(
+		         (SELECT key FROM jsonb_each_text(ue.quantities) LIMIT 1),
+		         'tokens'
+		       ) AS quantity_type,
+		       SUM(ue.prompt_tokens + ue.completion_tokens) AS quantity,
+		       SUM(c.amount) AS amount,
+		       COUNT(*) AS event_count
+		FROM charges c
+		JOIN usage_events ue ON ue.record_id = c.record_id
+		WHERE c.tenant_id = $1 AND c.rated_at >= $2 AND c.rated_at < $3
+		GROUP BY ue.sku, ue.geo, quantity_type
+		ORDER BY ue.sku, ue.geo, quantity_type`, tenantID, periodStart, periodEnd)
+	if err != nil {
+		return nil, false, fmt.Errorf("aggregate charges: %w", err)
+	}
+
+	var lineItems []lineData
+	for rows.Next() {
+		var ld lineData
+		var amountStr string
+		if err := rows.Scan(&ld.sku, &ld.geo, &ld.quantityType, &ld.quantity, &amountStr, &ld.eventCount); err != nil {
+			rows.Close()
+			return nil, false, fmt.Errorf("scan charge aggregate: %w", err)
+		}
+		amt, err := decimal.NewFromString(amountStr)
+		if err != nil {
+			rows.Close()
+			return nil, false, fmt.Errorf("parse amount %q: %w", amountStr, err)
+		}
+		ld.amount = amt
+		lineItems = append(lineItems, ld)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, false, fmt.Errorf("iterate charge aggregates: %w", err)
+	}
+	rows.Close()
+
+	totalDec := decimal.Zero
+	for i, ld := range lineItems {
+		var rate decimal.Decimal
+		if ld.quantity > 0 {
+			rate = ld.amount.Div(decimal.NewFromInt(ld.quantity))
+		}
+
+		chargeQuery, _ := json.Marshal(map[string]any{
+			"tenant_id":   tenantID,
+			"period":      period,
+			"sku":         ld.sku,
+			"geo":         ld.geo,
+			"event_count": ld.eventCount,
+		})
+
+		_, err = tx.Exec(ctx, `
+			INSERT INTO invoice_lines (invoice_id, line_no, description, sku, geo, quantity_type,
+				quantity, rate, amount, charge_query)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10)`,
+			invoiceID, i+1,
+			fmt.Sprintf("%s %s usage", ld.sku, ld.quantityType),
+			ld.sku, nilIfEmpty(ld.geo), ld.quantityType,
+			ld.quantity, rate.StringFixed(6), ld.amount.StringFixed(6), chargeQuery,
+		)
+		if err != nil {
+			return nil, false, fmt.Errorf("insert invoice line: %w", err)
+		}
+
+		totalDec = totalDec.Add(ld.amount)
+	}
+
+	// Finalize the invoice
+	now := time.Now().UTC()
+	_, err = tx.Exec(ctx, `
+		UPDATE invoices SET total = $1::numeric, status = 'finalized', finalized_at = $2
+		WHERE invoice_id = $3`,
+		totalDec.StringFixed(6), now, invoiceID,
+	)
+	if err != nil {
+		return nil, false, fmt.Errorf("finalize invoice: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, fmt.Errorf("commit: %w", err)
+	}
+
+	return &Invoice{
+		InvoiceID:   invoiceID,
+		TenantID:    tenantID,
+		Period:      period,
+		Status:      "finalized",
+		Total:       totalDec.StringFixed(6),
+		FinalizedAt: &now,
+	}, true, nil
+}
+
+// QueryInvoices lists invoices for a tenant, ordered by period descending.
+func (s *Store) QueryInvoices(ctx context.Context, tenantID string, limit int) ([]Invoice, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT invoice_id, tenant_id, period, status, total, psp_ref, finalized_at
+		FROM invoices
+		WHERE tenant_id = $1
+		ORDER BY period DESC
+		LIMIT $2`, tenantID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query invoices: %w", err)
+	}
+	defer rows.Close()
+
+	var invoices []Invoice
+	for rows.Next() {
+		var inv Invoice
+		var pspRef *string
+		if err := rows.Scan(&inv.InvoiceID, &inv.TenantID, &inv.Period, &inv.Status,
+			&inv.Total, &pspRef, &inv.FinalizedAt); err != nil {
+			return nil, fmt.Errorf("scan invoice: %w", err)
+		}
+		if pspRef != nil {
+			inv.PSPRef = *pspRef
+		}
+		invoices = append(invoices, inv)
+	}
+	return invoices, rows.Err()
+}
+
+// GetInvoiceWithLines returns a specific invoice with its line items.
+// Returns nil, nil if the invoice does not exist.
+func (s *Store) GetInvoiceWithLines(ctx context.Context, invoiceID string) (*InvoiceWithLines, error) {
+	var inv InvoiceWithLines
+	var pspRef *string
+	err := s.pool.QueryRow(ctx, `
+		SELECT invoice_id, tenant_id, period, status, total, psp_ref, finalized_at
+		FROM invoices WHERE invoice_id = $1`, invoiceID,
+	).Scan(&inv.InvoiceID, &inv.TenantID, &inv.Period, &inv.Status,
+		&inv.Total, &pspRef, &inv.FinalizedAt)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get invoice: %w", err)
+	}
+	if pspRef != nil {
+		inv.PSPRef = *pspRef
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT invoice_id, line_no, description, COALESCE(sku, ''), COALESCE(geo, ''),
+			COALESCE(quantity_type, ''), COALESCE(quantity, 0), COALESCE(rate, 0)::text, amount::text, charge_query
+		FROM invoice_lines WHERE invoice_id = $1 ORDER BY line_no`, invoiceID)
+	if err != nil {
+		return nil, fmt.Errorf("query invoice lines: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var line InvoiceLine
+		if err := rows.Scan(&line.InvoiceID, &line.LineNo, &line.Description,
+			&line.SKU, &line.Geo, &line.QuantityType, &line.Quantity,
+			&line.Rate, &line.Amount, &line.ChargeQuery); err != nil {
+			return nil, fmt.Errorf("scan invoice line: %w", err)
+		}
+		inv.Lines = append(inv.Lines, line)
+	}
+	return &inv, rows.Err()
+}
+
 func splitPageToken(token string) []string {
 	idx := strings.LastIndex(token, "|")
 	if idx < 0 {

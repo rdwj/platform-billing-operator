@@ -86,6 +86,24 @@ var (
 		},
 		[]string{labelTenantID, "policy"},
 	)
+
+	InvoicesFinalized = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "billing",
+			Name:      "invoices_finalized_total",
+			Help:      "Number of invoices finalized.",
+		},
+		[]string{"tenant"},
+	)
+
+	InvoiceErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "billing",
+			Name:      "invoice_errors_total",
+			Help:      "Number of invoice finalization errors.",
+		},
+		[]string{"tenant"},
+	)
 )
 
 func init() {
@@ -100,5 +118,7 @@ func init() {
 		TenantBalance,
 		TenantMTDSpend,
 		BudgetUtilization,
+		InvoicesFinalized,
+		InvoiceErrors,
 	)
 }

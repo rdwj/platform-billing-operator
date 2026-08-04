@@ -44,6 +44,7 @@ import (
 	"github.com/rdwj/platform-billing-operator/internal/controller"
 	"github.com/rdwj/platform-billing-operator/internal/drift"
 	"github.com/rdwj/platform-billing-operator/internal/enforcement"
+	"github.com/rdwj/platform-billing-operator/internal/invoice"
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
 	"github.com/rdwj/platform-billing-operator/internal/metering/gpu"
 	"github.com/rdwj/platform-billing-operator/internal/rater"
@@ -349,6 +350,29 @@ func main() {
 			}
 		})); err != nil {
 			setupLog.Error(err, "unable to add drift reconciler")
+			os.Exit(1)
+		}
+
+		// --- Invoice finalization job ---
+		invoiceLog := slog.New(logr.ToSlogHandler(ctrl.Log.WithName("invoice")))
+		invoiceJob := invoice.New(store, mgr.GetClient(), invoiceLog)
+		invoiceInterval := 24 * time.Hour
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			ilog := ctrl.Log.WithName("invoice-finalization")
+			ticker := time.NewTicker(invoiceInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+					if err := invoiceJob.Tick(ctx); err != nil {
+						ilog.Error(err, "invoice tick failed")
+					}
+				}
+			}
+		})); err != nil {
+			setupLog.Error(err, "unable to add invoice finalization job")
 			os.Exit(1)
 		}
 

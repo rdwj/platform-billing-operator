@@ -1,6 +1,9 @@
 package ledger
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type IngestResult string
 
@@ -113,4 +116,32 @@ type DriftReport struct {
 	Exceeded     bool      `json:"exceeded"`
 	Signature    string    `json:"signature"`
 	CreatedAt    time.Time `json:"created_at"`
+}
+
+type Invoice struct {
+	InvoiceID   string     `json:"invoice_id"`
+	TenantID    string     `json:"tenant_id"`
+	Period      string     `json:"period"`
+	Status      string     `json:"status"`
+	Total       string     `json:"total"`
+	PSPRef      string     `json:"psp_ref,omitempty"`
+	FinalizedAt *time.Time `json:"finalized_at,omitempty"`
+}
+
+type InvoiceLine struct {
+	InvoiceID    string          `json:"invoice_id"`
+	LineNo       int             `json:"line_no"`
+	Description  string          `json:"description"`
+	SKU          string          `json:"sku,omitempty"`
+	Geo          string          `json:"geo,omitempty"`
+	QuantityType string          `json:"quantity_type,omitempty"`
+	Quantity     int64           `json:"quantity"`
+	Rate         string          `json:"rate,omitempty"`
+	Amount       string          `json:"amount"`
+	ChargeQuery  json.RawMessage `json:"charge_query"`
+}
+
+type InvoiceWithLines struct {
+	Invoice
+	Lines []InvoiceLine `json:"lines"`
 }

@@ -17,6 +17,8 @@ limitations under the License.
 package controller
 
 import (
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -242,6 +244,73 @@ var _ = Describe("BudgetPolicy controller", func() {
 				bp := fetchBudgetPolicy("bp-multi")
 				g.Expect(bp.Status.FiredThresholds).To(HaveLen(2))
 			}, "10s", "250ms").Should(Succeed())
+		})
+	})
+
+	Context("period rollover thaw", func() {
+		It("thaws enforcement when a frozen cap's period rolls over", func() {
+			createTenant("ten-thaw")
+			setPeriodSpend("ten-thaw", "11000.000000")
+			setBalance("ten-thaw", "10000")
+
+			createBudgetPolicy("bp-thaw", "ten-thaw", []billingv1alpha1.BudgetCap{
+				{
+					Amount: "10000",
+					Period: billingv1alpha1.PeriodDaily,
+					Thresholds: []billingv1alpha1.BudgetThreshold{
+						{Pct: 100, Action: billingv1alpha1.ThresholdActionFreeze},
+					},
+				},
+			})
+
+			// Wait for freeze to fire.
+			Eventually(func(g Gomega) {
+				calls := testBackend.callsForTenant("ten-thaw")
+				freezeCalls := 0
+				for _, c := range calls {
+					if c.method == "Freeze" {
+						freezeCalls++
+					}
+				}
+				g.Expect(freezeCalls).To(BeNumerically(">=", 1))
+			}, "10s", "250ms").Should(Succeed())
+
+			// Reset backend and lower spend so freeze doesn't immediately re-fire.
+			testBackend.reset()
+			setPeriodSpend("ten-thaw", "0.000000")
+
+			// Simulate period rollover by backdating CapPeriodEnds.
+			Eventually(func(g Gomega) {
+				var bp billingv1alpha1.BudgetPolicy
+				g.Expect(k8sClient.Get(ctx, types.NamespacedName{
+					Name: "bp-thaw", Namespace: ns,
+				}, &bp)).To(Succeed())
+
+				yesterday := metav1.NewTime(time.Now().UTC().AddDate(0, 0, -1))
+				bp.Status.CapPeriodEnds = []billingv1alpha1.CapPeriodEnd{{
+					CapIndex:  0,
+					PeriodEnd: yesterday,
+				}}
+				g.Expect(k8sClient.Status().Update(ctx, &bp)).To(Succeed())
+			}, "5s", "250ms").Should(Succeed())
+
+			// Verify Thaw was called.
+			Eventually(func(g Gomega) {
+				calls := testBackend.callsForTenant("ten-thaw")
+				thawCalls := 0
+				for _, c := range calls {
+					if c.method == "Thaw" {
+						thawCalls++
+					}
+				}
+				g.Expect(thawCalls).To(BeNumerically(">=", 1))
+			}, "10s", "250ms").Should(Succeed())
+
+			// FiredThresholds should be cleared after rollover.
+			Eventually(func(g Gomega) {
+				bp := fetchBudgetPolicy("bp-thaw")
+				g.Expect(bp.Status.FiredThresholds).To(BeEmpty())
+			}, "5s", "250ms").Should(Succeed())
 		})
 	})
 

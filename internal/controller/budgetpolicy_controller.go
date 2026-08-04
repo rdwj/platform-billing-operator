@@ -108,7 +108,13 @@ func (r *BudgetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 		prevPeriodEnd := capPeriodEnd(bp.Status.CapPeriodEnds, int32(capIdx))
 		if prevPeriodEnd != nil && !prevPeriodEnd.Equal(periodEnd) {
+			wasFrozen := hadFiredFreeze(bp.Status.FiredThresholds, int32(capIdx), cap.Thresholds)
 			bp.Status.FiredThresholds = clearFiredForCap(bp.Status.FiredThresholds, int32(capIdx))
+			if wasFrozen && r.Enforcement != nil {
+				if err := r.Enforcement.Thaw(ctx, &acct); err != nil {
+					logger.Error(err, "thaw enforcement failed on period rollover", "tenant", acct.Name, "cap", capIdx)
+				}
+			}
 		}
 		bp.Status.CapPeriodEnds = setCapPeriodEnd(bp.Status.CapPeriodEnds, int32(capIdx), periodEnd)
 
@@ -252,6 +258,20 @@ func alreadyFired(fired []billingv1alpha1.FiredThreshold, capIdx, pct int32) boo
 	for _, f := range fired {
 		if f.CapIndex == capIdx && f.Pct == pct {
 			return true
+		}
+	}
+	return false
+}
+
+func hadFiredFreeze(fired []billingv1alpha1.FiredThreshold, capIdx int32, thresholds []billingv1alpha1.BudgetThreshold) bool {
+	for _, f := range fired {
+		if f.CapIndex != capIdx {
+			continue
+		}
+		for _, t := range thresholds {
+			if t.Pct == f.Pct && t.Action == billingv1alpha1.ThresholdActionFreeze {
+				return true
+			}
 		}
 	}
 	return false
