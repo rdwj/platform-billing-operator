@@ -75,6 +75,8 @@ const (
 	statusPending  = "pending"
 	statusComplete = "complete"
 	statusFailed   = "failed"
+
+	kindBillingConnector = "BillingConnector"
 )
 
 // StepStatus is the per-step verification result.
@@ -125,12 +127,12 @@ func (h *Handler) evaluateCondition(ctx context.Context, step Step) StepStatus {
 
 	kind := probe.Kind
 	if kind == "" {
-		kind = "BillingConnector"
+		kind = kindBillingConnector
 	}
 	name := probe.Name
 
 	switch kind {
-	case "BillingConnector":
+	case kindBillingConnector:
 		var bc billingv1alpha1.BillingConnector
 		key := types.NamespacedName{Name: name, Namespace: h.namespace}
 		if err := h.client.Get(ctx, key, &bc); err != nil {
@@ -282,7 +284,7 @@ func (h *Handler) executeWrites(
 			if err := h.applySecret(ctx, ws.Name, rendered, ws.Patch != ""); err != nil {
 				return nil, fmt.Errorf("applying Secret %s: %w", ws.Name, err)
 			}
-		case "BillingConnector":
+		case kindBillingConnector:
 			if err := h.applyBillingConnector(ctx, ws.Name, rendered, ws.Patch != ""); err != nil {
 				return nil, fmt.Errorf("applying BillingConnector %s: %w", ws.Name, err)
 			}
