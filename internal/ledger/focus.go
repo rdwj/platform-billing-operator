@@ -1,5 +1,11 @@
 package ledger
 
+const (
+	FOCUSConsumedUnit    = "Tokens"
+	FOCUSProvider        = "platform-billing-operator"
+	FOCUSChargeFrequency = "Usage-Based"
+)
+
 // FOCUSRow represents a single row in a FOCUS 1.2-compliant cost and usage export.
 type FOCUSRow struct {
 	// Mandatory columns (FOCUS 1.2)

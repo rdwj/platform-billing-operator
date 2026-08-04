@@ -688,7 +688,7 @@ func (s *Store) QueryLatestDriftReport(ctx context.Context, tenantID string) (*D
 // a valid FOCUS export requires a currency, and usage_hourly rows without rated charges
 // cannot produce one. Aggregates across key_id and geo — the export grain is (sku, quantity_type, hour).
 func (s *Store) QueryExportData(ctx context.Context, tenantID string, from, to time.Time) ([]FOCUSRow, error) {
-	const sql = `
+	const exportSQL = `
 		WITH tenant_currency AS (
 			SELECT DISTINCT currency FROM charges WHERE tenant_id = $1 LIMIT 1
 		)
@@ -701,7 +701,7 @@ func (s *Store) QueryExportData(ctx context.Context, tenantID string, from, to t
 		GROUP BY uh.sku, uh.quantity_type, uh.hour, tc.currency
 		ORDER BY uh.hour, uh.sku, uh.quantity_type`
 
-	rows, err := s.pool.Query(ctx, sql, tenantID, from, to)
+	rows, err := s.pool.Query(ctx, exportSQL, tenantID, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("query export data: %w", err)
 	}
@@ -745,12 +745,12 @@ func (s *Store) QueryExportData(ctx context.Context, tenantID string, from, to t
 			ContractedCost:     billedCost,
 			EffectiveCost:      billedCost,
 			ConsumedQuantity:   consumedQty,
-			ConsumedUnit:       "Tokens",
+			ConsumedUnit:       FOCUSConsumedUnit,
 			ListCost:           billedCost,
 			PricingQuantity:    consumedQty,
-			PricingUnit:        "Tokens",
-			Provider:           "platform-billing-operator",
-			Publisher:          "platform-billing-operator",
+			PricingUnit:        FOCUSConsumedUnit,
+			Provider:           FOCUSProvider,
+			Publisher:          FOCUSProvider,
 			ResourceId:         sku,
 			ResourceName:       sku,
 			ServiceCategory:    "AI and Machine Learning",
@@ -759,7 +759,7 @@ func (s *Store) QueryExportData(ctx context.Context, tenantID string, from, to t
 			SkuMeter:           quantityType,
 			SubAccountId:       tenantID,
 			SubAccountName:     tenantID,
-			ChargeFrequency:    "Usage-Based",
+			ChargeFrequency:    FOCUSChargeFrequency,
 		})
 	}
 	if err := rows.Err(); err != nil {

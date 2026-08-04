@@ -25,12 +25,12 @@ func TestFOCUSCSVRecordMatchesHeader(t *testing.T) {
 		ContractedCost:     "1.000000",
 		EffectiveCost:      "1.000000",
 		ConsumedQuantity:   "500",
-		ConsumedUnit:       "Tokens",
+		ConsumedUnit:       FOCUSConsumedUnit,
 		ListCost:           "1.000000",
 		PricingQuantity:    "500",
-		PricingUnit:        "Tokens",
-		Provider:           "platform-billing-operator",
-		Publisher:          "platform-billing-operator",
+		PricingUnit:        FOCUSConsumedUnit,
+		Provider:           FOCUSProvider,
+		Publisher:          FOCUSProvider,
 		ResourceId:         "gpt-4o",
 		ResourceName:       "gpt-4o",
 		ServiceCategory:    "AI and Machine Learning",
@@ -39,7 +39,7 @@ func TestFOCUSCSVRecordMatchesHeader(t *testing.T) {
 		SkuMeter:           "prompt_tokens",
 		SubAccountId:       "tenant-1",
 		SubAccountName:     "tenant-1",
-		ChargeFrequency:    "Usage-Based",
+		ChargeFrequency:    FOCUSChargeFrequency,
 	}
 
 	header := FOCUSCSVHeader()
@@ -77,7 +77,7 @@ func TestFOCUSCSVRecordOrder(t *testing.T) {
 		EffectiveCost:   "0.005000",
 		SkuId:           "llama-3-70b",
 		SkuMeter:        "completion_tokens",
-		ChargeFrequency: "Usage-Based",
+		ChargeFrequency: FOCUSChargeFrequency,
 	}
 	record := row.CSVRecord()
 
@@ -89,7 +89,7 @@ func TestFOCUSCSVRecordOrder(t *testing.T) {
 		{12, "0.005000"},
 		{24, "llama-3-70b"},
 		{25, "completion_tokens"},
-		{28, "Usage-Based"},
+		{28, FOCUSChargeFrequency},
 	}
 	for _, c := range valueChecks {
 		if record[c.index] != c.want {
