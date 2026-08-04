@@ -463,8 +463,17 @@ func TestExportJSONWithData(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "ten-export-test"
 
-	// Insert a charge row (needed for currency resolution via tenant_currency CTE).
+	// Insert a usage event (charges FK requires a matching record_id in usage_events).
 	_, err := testPool.Exec(ctx, `
+		INSERT INTO usage_events (record_id, tenant_id, sku, profile, collector,
+			prompt_tokens, quantities, status, content_hash, event_ts)
+		VALUES ('req-export-001', $1, 'gpt-4o', 'maas', 'test',
+			500, '{"prompt_tokens":500}', 'ok', 'hash-export-001', '2026-08-01T10:00:00Z')
+		ON CONFLICT (record_id) DO NOTHING`, tenantID)
+	require.NoError(t, err)
+
+	// Insert a charge row (needed for currency resolution via tenant_currency CTE).
+	_, err = testPool.Exec(ctx, `
 		INSERT INTO charges (record_id, tenant_id, price_book, price_book_rev,
 			amount, currency, components, rated_at)
 		VALUES ('req-export-001', $1, 'pb-standard', 1, '0.010000', 'USD', '[]', '2026-08-01T10:00:00Z')
