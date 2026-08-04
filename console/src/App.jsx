@@ -3,6 +3,7 @@ import { makeData, mkDetail } from './data.js';
 import { DISPLAY, PAL } from './ui.jsx';
 import { Overview, Models, Tenants, TenantDetail, Plans, UsageExplorer, Billing, Cost, Metering, ApiSurface } from './screens-provider.jsx';
 import { TOverview, TModels, TUsage, TBilling, TBudgets, TKeys } from './screens-tenant.jsx';
+import Integrations from './screens-integrations.jsx';
 import { fetchTenants, fetchBalance } from './api.js';
 
 const PROVIDER_NAV = [
@@ -11,7 +12,7 @@ const PROVIDER_NAV = [
   { hdr: 'Customers' },
   { id: 'tenants', label: 'Tenants' }, { id: 'usage', label: 'Usage explorer' },
   { hdr: 'Operate' },
-  { id: 'billing', label: 'Billing operations' }, { id: 'cost', label: 'Cost & margin' }, { id: 'metering', label: 'Metering health' },
+  { id: 'integrations', label: 'Integrations' }, { id: 'billing', label: 'Billing operations' }, { id: 'cost', label: 'Cost & margin' }, { id: 'metering', label: 'Metering health' },
   { hdr: 'Reference' },
   { id: 'api', label: 'API surface' }
 ];
@@ -145,6 +146,7 @@ export default function App() {
                 freezeLabel={frozen[td.tid] ? 'Unfreeze keys' : 'Freeze keys'} />
             )}
             {prov && screen === 'usage' && <UsageExplorer D={D} />}
+            {prov && screen === 'integrations' && <Integrations />}
             {prov && screen === 'billing' && <Billing D={D} dunning={dunning} />}
             {prov && screen === 'cost' && <Cost D={D} />}
             {prov && screen === 'metering' && <Metering D={D} />}
