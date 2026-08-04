@@ -1,0 +1,11 @@
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: BillingConsole
+metadata:
+  name: default
+  namespace: billing-system
+spec:
+  enabled: true
+  image: image-registry.openshift-image-registry.svc:5000/billing-system/billing-console:latest
+  replicas: 1
+  route:
+    host: ""
