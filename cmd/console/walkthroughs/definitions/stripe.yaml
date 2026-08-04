@@ -1,0 +1,114 @@
+id: stripe
+title: Connect Stripe
+prereqs:
+  - check: crdExists
+    kind: BillingConnector
+  - text: "A Stripe account with a restricted API key (read/write permissions for Customers, PaymentIntents, and Usage Records)"
+steps:
+  - id: credentials
+    title: API credentials
+    form:
+      - name: apiKey
+        kind: secret
+        secretKey: secretKey
+        label: Stripe restricted API key
+        help: "Restricted key (rk_live_... or rk_test_...), not your full secret key. Create one at dashboard.stripe.com/apikeys."
+        validate: "^rk_(live|test)_"
+    writes:
+      - kind: Secret
+        name: stripe-keys
+        template: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: stripe-keys
+          type: Opaque
+          stringData:
+            secretKey: "{{.formValues.apiKey}}"
+      - kind: BillingConnector
+        name: stripe
+        template: |
+          apiVersion: billing.opendatahub.io/v1alpha1
+          kind: BillingConnector
+          metadata:
+            name: stripe
+          spec:
+            type: stripe
+            credentialsSecretRef:
+              name: stripe-keys
+            taxMode: none
+    verify:
+      condition:
+        kind: BillingConnector
+        name: stripe
+        type: CredentialsValid
+      timeout: "60s"
+      failureHints:
+        InvalidKey: "Key rejected by Stripe. Verify it is a restricted key with the required scopes."
+        SecretNotFound: "Secret stripe-keys was not found. Re-enter your API key."
+
+  - id: webhook
+    title: Webhook endpoint
+    display:
+      - label: Endpoint URL
+        from: connectorStatus.webhookURL
+        copyable: true
+      - label: Signing secret
+        form:
+          name: webhookSecret
+          kind: secret
+          secretKey: webhookSecret
+          label: Webhook signing secret
+          help: "From Stripe Dashboard > Developers > Webhooks > Signing secret"
+      - label: Events to subscribe
+        value: "payment_intent.succeeded, payment_intent.payment_failed, charge.dispute.created"
+    writes:
+      - kind: Secret
+        name: stripe-keys
+        patch: |
+          stringData:
+            webhookSecret: "{{.formValues.webhookSecret}}"
+    verify:
+      condition:
+        kind: BillingConnector
+        name: stripe
+        type: WebhookReachable
+      action:
+        button: Send test event
+        bffCall: /api/connectors/stripe/test-webhook
+      timeout: "120s"
+      failureHints:
+        SignatureInvalid: "Webhook signature verification failed. Check the signing secret matches the one in your Stripe dashboard."
+        EndpointUnreachable: "Webhook endpoint is not reachable. Verify the Route is admitted and DNS is resolving."
+
+  - id: reload-dry-run
+    title: Test an auto-reload
+    text: "Runs a $1 PaymentIntent in test mode against a sandbox TenantAccount and confirms the ledger credit. Requires a live psp-connector and ledger."
+    verify:
+      bffCall: /api/connectors/stripe/dry-run-reload
+      expects:
+        ledgerCredit: true
+        tenantState: Active
+      timeout: "30s"
+      failureHints:
+        ConnectorNotReady: "The psp-connector is not running. This step requires a live environment."
+        LedgerUnreachable: "Cannot reach the ledger service. Verify ledger-svc is deployed."
+
+  - id: enable
+    title: Enable sync
+    writes:
+      - kind: BillingConnector
+        name: stripe
+        patch: |
+          spec:
+            sync:
+              usageRecordsInterval: "5m"
+              invoiceInterval: "1h"
+    verify:
+      condition:
+        kind: BillingConnector
+        name: stripe
+        type: SyncHealthy
+      timeout: "60s"
+      failureHints:
+        SyncFailed: "Sync is failing. Check psp-connector logs for details."

@@ -1,0 +1,59 @@
+id: generic-webhook
+title: Connect Generic Webhook
+prereqs:
+  - check: crdExists
+    kind: BillingConnector
+  - text: "An HTTP endpoint that accepts POST requests with HMAC-SHA256 signed JSON payloads for usage events and credit notifications"
+steps:
+  - id: configure
+    title: Configure webhook
+    form:
+      - name: webhookURL
+        label: Webhook URL
+        help: "The HTTPS endpoint where billing events will be delivered (e.g. https://billing.example.com/webhook)"
+        validate: "^https://"
+      - name: hmacSecret
+        kind: secret
+        secretKey: hmacSecret
+        label: HMAC signing key
+        help: "Shared secret for HMAC-SHA256 request signing. Generate one with: openssl rand -hex 32"
+    writes:
+      - kind: Secret
+        name: generic-webhook-keys
+        template: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: generic-webhook-keys
+          type: Opaque
+          stringData:
+            hmacSecret: "{{.formValues.hmacSecret}}"
+      - kind: BillingConnector
+        name: generic-webhook
+        template: |
+          apiVersion: billing.opendatahub.io/v1alpha1
+          kind: BillingConnector
+          metadata:
+            name: generic-webhook
+          spec:
+            type: webhook
+            credentialsSecretRef:
+              name: generic-webhook-keys
+            webhookIngress:
+              host: "{{.formValues.webhookURL}}"
+
+  - id: verify
+    title: Verify connectivity
+    text: "Sends a test event to the configured webhook endpoint and verifies the response."
+    verify:
+      condition:
+        kind: BillingConnector
+        name: generic-webhook
+        type: WebhookReachable
+      action:
+        button: Send test event
+        bffCall: /api/connectors/generic-webhook/test-webhook
+      timeout: "30s"
+      failureHints:
+        EndpointUnreachable: "Cannot reach the webhook URL. Verify the endpoint is accessible from the cluster."
+        SignatureRejected: "The endpoint rejected the HMAC signature. Verify both sides use the same signing key."
