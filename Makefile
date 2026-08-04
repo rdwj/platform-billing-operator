@@ -320,8 +320,8 @@ demo-g0: ## Run G0 demo (GPUaaS metering + unified wallet)
 	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-g0.sh
 
 .PHONY: demo-m5
-demo-m5: ## Run M5 demo (GPUaaS metering — see demo-g0)
-	@echo "demo-m5: superseded by demo-g0"
+demo-m5: ## Run M5 demo (Reconciler + Budgets + Exports)
+	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-m5.sh
 
 .PHONY: demo-m6
 demo-m6: ## Run M6 demo (console UI)
