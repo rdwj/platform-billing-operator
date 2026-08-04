@@ -48,8 +48,9 @@ var (
 )
 
 const (
-	consoleResourceName = "billing-console"
-	consoleListenPort   = 9090
+	consoleResourceName  = "billing-console"
+	consoleSingletonName = "default"
+	consoleListenPort    = 9090
 	oauthProxyImage     = "registry.redhat.io/openshift4/ose-oauth-proxy:latest"
 	oauthProxyPort      = 4180
 	consoleSAName       = "billing-console"
@@ -83,7 +84,7 @@ func (r *BillingConsoleReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, err
 	}
 
-	if console.Name != "default" {
+	if console.Name != consoleSingletonName {
 		apimeta.SetStatusCondition(&console.Status.Conditions, metav1.Condition{
 			Type:               billingv1alpha1.ConditionConsoleDeployed,
 			Status:             metav1.ConditionFalse,
@@ -470,7 +471,7 @@ func (r *BillingConsoleReconciler) reconcileRoute(ctx context.Context, console *
 		route.SetLabels(consoleLabels())
 
 		spec := map[string]interface{}{
-			"to": map[string]interface{}{
+			"to": map[string]interface{}{ //nolint:goconst // K8s API field names
 				"kind":   "Service",
 				"name":   consoleResourceName,
 				"weight": int64(100),
