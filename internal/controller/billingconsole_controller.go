@@ -155,18 +155,17 @@ func (r *BillingConsoleReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		return ctrl.Result{}, nil
 	}
 
-	// --- OpenShiftOAuth resources (SA + cookie Secret) ---
+	// --- ServiceAccount (always needed for walkthrough RBAC) ---
+	if err := r.reconcileServiceAccount(ctx, &console, authMode); err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// --- OpenShiftOAuth cookie Secret ---
 	if authMode == billingv1alpha1.AuthModeOpenShiftOAuth {
-		if err := r.reconcileServiceAccount(ctx, &console); err != nil {
-			return ctrl.Result{}, err
-		}
 		if err := r.reconcileCookieSecret(ctx, &console); err != nil {
 			return ctrl.Result{}, err
 		}
 	} else {
-		r.deleteIfExists(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{
-			Name: consoleSAName, Namespace: r.OperatorNamespace,
-		}})
 		r.deleteIfExists(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{
 			Name: consoleCookieSecret, Namespace: r.OperatorNamespace,
 		}})
@@ -299,7 +298,7 @@ func (r *BillingConsoleReconciler) reconcileDeployment(ctx context.Context, cons
 
 	containers := []corev1.Container{consoleContainer}
 	var volumes []corev1.Volume
-	saName := ""
+	saName := consoleSAName
 
 	if authMode == billingv1alpha1.AuthModeOpenShiftOAuth {
 		containers = append(containers, corev1.Container{
@@ -332,7 +331,6 @@ func (r *BillingConsoleReconciler) reconcileDeployment(ctx context.Context, cons
 				},
 			},
 		}
-		saName = consoleSAName
 	}
 
 	dep := &appsv1.Deployment{
@@ -604,7 +602,7 @@ func (r *BillingConsoleReconciler) checkDeploymentStatus(ctx context.Context) co
 	}
 }
 
-func (r *BillingConsoleReconciler) reconcileServiceAccount(ctx context.Context, console *billingv1alpha1.BillingConsole) error {
+func (r *BillingConsoleReconciler) reconcileServiceAccount(ctx context.Context, console *billingv1alpha1.BillingConsole, authMode string) error {
 	sa := &corev1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      consoleSAName,
@@ -617,11 +615,15 @@ func (r *BillingConsoleReconciler) reconcileServiceAccount(ctx context.Context, 
 			return err
 		}
 		sa.Labels = consoleLabels()
-		redirectRef := fmt.Sprintf(`{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"%s"}}`, consoleResourceName)
-		if sa.Annotations == nil {
-			sa.Annotations = map[string]string{}
+		if authMode == billingv1alpha1.AuthModeOpenShiftOAuth {
+			redirectRef := fmt.Sprintf(`{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"%s"}}`, consoleResourceName)
+			if sa.Annotations == nil {
+				sa.Annotations = map[string]string{}
+			}
+			sa.Annotations["serviceaccounts.openshift.io/oauth-redirectreference.primary"] = redirectRef
+		} else {
+			delete(sa.Annotations, "serviceaccounts.openshift.io/oauth-redirectreference.primary")
 		}
-		sa.Annotations["serviceaccounts.openshift.io/oauth-redirectreference.primary"] = redirectRef
 		return nil
 	})
 	return err

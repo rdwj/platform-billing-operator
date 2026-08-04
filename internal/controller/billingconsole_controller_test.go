@@ -332,7 +332,7 @@ var _ = Describe("BillingConsole Controller", Serial, Ordered, func() {
 			g.Expect(clientIDEnv.ValueFrom.SecretKeyRef.Name).To(Equal("my-oidc-creds"))
 			g.Expect(clientIDEnv.ValueFrom.SecretKeyRef.Key).To(Equal("client-id"))
 
-			g.Expect(dep.Spec.Template.Spec.ServiceAccountName).To(BeEmpty())
+			g.Expect(dep.Spec.Template.Spec.ServiceAccountName).To(Equal("billing-console"))
 			g.Expect(dep.Spec.Template.Spec.Volumes).To(BeEmpty())
 		}, timeout, interval).Should(Succeed())
 
