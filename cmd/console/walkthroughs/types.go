@@ -58,11 +58,11 @@ type WriteSpec struct {
 
 // VerifySpec describes how the BFF checks that a step completed.
 type VerifySpec struct {
-	Condition    *ConditionProbe  `json:"condition,omitempty"    yaml:"condition,omitempty"`
-	BFFCall      string           `json:"bffCall,omitempty"      yaml:"bffCall,omitempty"`
-	Expects      map[string]any   `json:"expects,omitempty"      yaml:"expects,omitempty"`
-	Action       *VerifyAction    `json:"action,omitempty"       yaml:"action,omitempty"`
-	Timeout      string           `json:"timeout,omitempty"      yaml:"timeout,omitempty"`
+	Condition    *ConditionProbe   `json:"condition,omitempty"    yaml:"condition,omitempty"`
+	BFFCall      string            `json:"bffCall,omitempty"      yaml:"bffCall,omitempty"`
+	Expects      map[string]any    `json:"expects,omitempty"      yaml:"expects,omitempty"`
+	Action       *VerifyAction     `json:"action,omitempty"       yaml:"action,omitempty"`
+	Timeout      string            `json:"timeout,omitempty"      yaml:"timeout,omitempty"`
 	FailureHints map[string]string `json:"failureHints,omitempty" yaml:"failureHints,omitempty"`
 }
 

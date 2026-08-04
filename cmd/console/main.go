@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rdwj/platform-billing-operator/cmd/console/authn"
+	"github.com/rdwj/platform-billing-operator/cmd/console/walkthroughs"
 	"github.com/rdwj/platform-billing-operator/console"
 )
 
@@ -66,38 +67,56 @@ func main() {
 	}
 	mux.Handle("/api/", auth.Middleware(providerHandler))
 
-	// Tenant portal routes
-	tenantPortalEnabled := os.Getenv("TENANT_PORTAL_ENABLED")
-	if tenantPortalEnabled != "false" && authMode != "" {
-		operatorNS := os.Getenv("OPERATOR_NAMESPACE")
-		if operatorNS == "" {
-			log.Fatal("OPERATOR_NAMESPACE is required when tenant portal is enabled")
-		}
-
-		lister, err := authn.NewK8sTenantLister(operatorNS)
+	// K8s client for tenant portal and walkthrough execution
+	operatorNS := os.Getenv("OPERATOR_NAMESPACE")
+	var k8sEnabled bool
+	if operatorNS != "" {
+		k8sClient, err := newK8sClient()
 		if err != nil {
-			log.Fatalf("tenant lister init: %v", err)
+			log.Fatalf("k8s client init: %v", err)
 		}
-		resolver := authn.NewTenantResolver(lister)
-		tenantMW := authn.TenantMiddleware(resolver)
+		k8sEnabled = true
 
-		portalProxy := &httputil.ReverseProxy{
-			Rewrite: func(r *httputil.ProxyRequest) {
-				r.SetURL(target)
-				r.Out.URL.Path = "/v1/" + strings.TrimPrefix(r.In.URL.Path, "/portal/api/")
-
-				tenant := authn.TenantFromContext(r.In.Context())
-				q := r.Out.URL.Query()
-				q.Set("tenant", tenant)
-				r.Out.URL.RawQuery = q.Encode()
-			},
+		// Walkthrough routes (provider-only)
+		defs, err := walkthroughs.Load()
+		if err != nil {
+			log.Fatalf("walkthrough loader: %v", err)
 		}
+		wtHandler := walkthroughs.NewHandler(defs, k8sClient, operatorNS)
+		var wtRoutes http.Handler = wtHandler
+		if authMode != "" {
+			wtRoutes = authn.RequireProviderRole(wtHandler)
+		}
+		mux.Handle("/api/walkthroughs", auth.Middleware(wtRoutes))
+		mux.Handle("/api/walkthroughs/", auth.Middleware(wtRoutes))
+		log.Printf("walkthroughs loaded: %d definitions", len(defs))
 
-		mux.Handle("/portal/api/", auth.Middleware(tenantMW(portalProxy)))
-		mux.Handle("/portal/", spaHandler)
+		// Tenant portal routes
+		tenantPortalEnabled := os.Getenv("TENANT_PORTAL_ENABLED")
+		if tenantPortalEnabled != "false" && authMode != "" {
+			lister := authn.NewK8sTenantLister(k8sClient, operatorNS)
+			resolver := authn.NewTenantResolver(lister)
+			tenantMW := authn.TenantMiddleware(resolver)
 
-		log.Printf("tenant portal enabled (namespace: %s)", operatorNS)
+			portalProxy := &httputil.ReverseProxy{
+				Rewrite: func(r *httputil.ProxyRequest) {
+					r.SetURL(target)
+					r.Out.URL.Path = "/v1/" + strings.TrimPrefix(r.In.URL.Path, "/portal/api/")
+
+					tenant := authn.TenantFromContext(r.In.Context())
+					q := r.Out.URL.Query()
+					q.Set("tenant", tenant)
+					r.Out.URL.RawQuery = q.Encode()
+				},
+			}
+
+			mux.Handle("/portal/api/", auth.Middleware(tenantMW(portalProxy)))
+			mux.Handle("/portal/", spaHandler)
+
+			log.Printf("tenant portal enabled (namespace: %s)", operatorNS)
+		}
 	}
+	_ = k8sEnabled
 
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
