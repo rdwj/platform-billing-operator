@@ -66,6 +66,7 @@ type BillingConsoleReconciler struct {
 }
 
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=billingconsoles,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=billing.opendatahub.io,resources=billingconsoles/finalizers,verbs=update
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=billingconsoles/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete

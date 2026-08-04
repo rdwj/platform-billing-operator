@@ -80,6 +80,7 @@ rules:
 - apiGroups:
   - billing.opendatahub.io
   resources:
+  - billingconsoles/finalizers
   - budgetpolicies/finalizers
   - plans/finalizers
   - tenantaccounts/finalizers
