@@ -1,0 +1,15 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: billing-console-role
+  namespace: billing-system
+rules:
+  - apiGroups: ["billing.opendatahub.io"]
+    resources: ["billingconnectors"]
+    verbs: ["get", "create", "update", "patch"]
+  - apiGroups: ["billing.opendatahub.io"]
+    resources: ["tenantaccounts"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "update"]

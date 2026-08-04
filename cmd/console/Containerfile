@@ -20,7 +20,7 @@ COPY internal/ internal/
 RUN CGO_ENABLED=0 go build -o console ./cmd/console/
 
 # Stage 3: Runtime
-FROM gcr.io/distroless/static:nonroot
+FROM registry.redhat.io/ubi9/ubi-micro:latest
 WORKDIR /
 COPY --from=go-builder /workspace/console .
 USER 65532:65532

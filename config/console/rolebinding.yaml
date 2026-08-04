@@ -1,0 +1,13 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: billing-console-rolebinding
+  namespace: billing-system
+subjects:
+  - kind: ServiceAccount
+    name: billing-console
+    namespace: billing-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: billing-console-role
