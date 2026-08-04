@@ -34,7 +34,7 @@ func main() {
 	}
 
 	// Reverse proxy: /api/* -> ledger-svc /v1/*
-	proxy := &httputil.ReverseProxy{
+	providerProxy := &httputil.ReverseProxy{
 		Rewrite: func(r *httputil.ProxyRequest) {
 			r.SetURL(target)
 			r.Out.URL.Path = "/v1/" + strings.TrimPrefix(r.In.URL.Path, "/api/")
@@ -58,7 +58,47 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle("/api/", auth.Middleware(proxy))
+
+	// Provider routes: auth + role guard
+	var providerHandler http.Handler = providerProxy
+	if authMode != "" {
+		providerHandler = authn.RequireProviderRole(providerProxy)
+	}
+	mux.Handle("/api/", auth.Middleware(providerHandler))
+
+	// Tenant portal routes
+	tenantPortalEnabled := os.Getenv("TENANT_PORTAL_ENABLED")
+	if tenantPortalEnabled != "false" && authMode != "" {
+		operatorNS := os.Getenv("OPERATOR_NAMESPACE")
+		if operatorNS == "" {
+			log.Fatal("OPERATOR_NAMESPACE is required when tenant portal is enabled")
+		}
+
+		lister, err := authn.NewK8sTenantLister(operatorNS)
+		if err != nil {
+			log.Fatalf("tenant lister init: %v", err)
+		}
+		resolver := authn.NewTenantResolver(lister)
+		tenantMW := authn.TenantMiddleware(resolver)
+
+		portalProxy := &httputil.ReverseProxy{
+			Rewrite: func(r *httputil.ProxyRequest) {
+				r.SetURL(target)
+				r.Out.URL.Path = "/v1/" + strings.TrimPrefix(r.In.URL.Path, "/portal/api/")
+
+				tenant := authn.TenantFromContext(r.In.Context())
+				q := r.Out.URL.Query()
+				q.Set("tenant", tenant)
+				r.Out.URL.RawQuery = q.Encode()
+			},
+		}
+
+		mux.Handle("/portal/api/", auth.Middleware(tenantMW(portalProxy)))
+		mux.Handle("/portal/", spaHandler)
+
+		log.Printf("tenant portal enabled (namespace: %s)", operatorNS)
+	}
+
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.WriteHeader(http.StatusOK)

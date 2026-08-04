@@ -411,6 +411,49 @@ var _ = Describe("BillingConsole Controller", Serial, Ordered, func() {
 		}, timeout, interval).Should(Succeed())
 	})
 
+	It("should inject OPERATOR_NAMESPACE and TENANT_PORTAL_ENABLED env vars", func() {
+		console := &billingv1alpha1.BillingConsole{
+			ObjectMeta: metav1.ObjectMeta{Name: "default"},
+			Spec: billingv1alpha1.BillingConsoleSpec{
+				Enabled: ptr.To(true),
+				Image:   "quay.io/test/console:v1",
+			},
+		}
+		Expect(k8sClient.Create(ctx, console)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var dep appsv1.Deployment
+			g.Expect(k8sClient.Get(ctx, depKey, &dep)).To(Succeed())
+			c := dep.Spec.Template.Spec.Containers[0]
+			envMap := envVarMap(c.Env)
+			g.Expect(envMap).To(HaveKeyWithValue("OPERATOR_NAMESPACE", "default"))
+			g.Expect(envMap).To(HaveKeyWithValue("TENANT_PORTAL_ENABLED", "true"))
+		}, timeout, interval).Should(Succeed())
+	})
+
+	It("should set TENANT_PORTAL_ENABLED=false when tenantPortal is disabled", func() {
+		console := &billingv1alpha1.BillingConsole{
+			ObjectMeta: metav1.ObjectMeta{Name: "default"},
+			Spec: billingv1alpha1.BillingConsoleSpec{
+				Enabled: ptr.To(true),
+				Image:   "quay.io/test/console:v1",
+				TenantPortal: &billingv1alpha1.TenantPortalConfig{
+					Enabled: ptr.To(false),
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, console)).To(Succeed())
+
+		Eventually(func(g Gomega) {
+			var dep appsv1.Deployment
+			g.Expect(k8sClient.Get(ctx, depKey, &dep)).To(Succeed())
+			c := dep.Spec.Template.Spec.Containers[0]
+			envMap := envVarMap(c.Env)
+			g.Expect(envMap).To(HaveKeyWithValue("TENANT_PORTAL_ENABLED", "false"))
+			g.Expect(envMap).To(HaveKeyWithValue("OPERATOR_NAMESPACE", "default"))
+		}, timeout, interval).Should(Succeed())
+	})
+
 	It("should set Disabled condition when enabled=false", func() {
 		console := &billingv1alpha1.BillingConsole{
 			ObjectMeta: metav1.ObjectMeta{Name: "default"},

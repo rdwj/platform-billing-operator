@@ -51,10 +51,10 @@ const (
 	consoleResourceName  = "billing-console"
 	consoleSingletonName = "default"
 	consoleListenPort    = 9090
-	oauthProxyImage     = "registry.redhat.io/openshift4/ose-oauth-proxy:latest"
-	oauthProxyPort      = 4180
-	consoleSAName       = "billing-console"
-	consoleCookieSecret = "billing-console-oauth"
+	oauthProxyImage      = "registry.redhat.io/openshift4/ose-oauth-proxy:latest"
+	oauthProxyPort       = 4180
+	consoleSAName        = "billing-console"
+	consoleCookieSecret  = "billing-console-oauth"
 )
 
 // BillingConsoleReconciler reconciles a BillingConsole object.
@@ -251,9 +251,16 @@ func (r *BillingConsoleReconciler) reconcileDeployment(ctx context.Context, cons
 
 	ledgerURL := fmt.Sprintf("http://ledger-svc.%s.svc.cluster.local:8080", r.OperatorNamespace)
 
+	tenantPortalEnabled := "true"
+	if console.Spec.TenantPortal != nil && console.Spec.TenantPortal.Enabled != nil && !*console.Spec.TenantPortal.Enabled {
+		tenantPortalEnabled = "false"
+	}
+
 	envVars := []corev1.EnvVar{
 		{Name: "LEDGER_URL", Value: ledgerURL},
 		{Name: "LISTEN_ADDR", Value: ":9090"},
+		{Name: "OPERATOR_NAMESPACE", Value: r.OperatorNamespace},
+		{Name: "TENANT_PORTAL_ENABLED", Value: tenantPortalEnabled},
 	}
 	envVars = append(envVars, r.authEnvVars(console, authMode)...)
 
