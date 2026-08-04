@@ -321,7 +321,7 @@ func TestHandleExecute_CreatesSecretAndBillingConnector(t *testing.T) {
 
 	body := ExecuteRequest{
 		FormValues: map[string]string{
-			"apiKey": "rk_test_abc123",
+			"apiKey": "rk_test_abc123", //gitleaks:allow -- test fixture, not a real key
 		},
 	}
 	bodyBytes, _ := json.Marshal(body)
