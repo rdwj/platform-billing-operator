@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rdwj/platform-billing-operator/internal/metrics"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -29,11 +30,13 @@ func NewIngester(store *Store) (*Ingester, error) {
 // DLQ for unknown schemas and conflicting content.
 func (ing *Ingester) IngestEvent(ctx context.Context, rawJSON json.RawMessage) (IngestResult, error) {
 	if err := validateEvent(ing.schema, rawJSON); err != nil {
+		metrics.IngestTotal.WithLabelValues(string(ValidationFailed)).Inc()
 		return ValidationFailed, nil
 	}
 
 	var ev rawEvent
 	if err := json.Unmarshal(rawJSON, &ev); err != nil {
+		metrics.IngestTotal.WithLabelValues(string(ValidationFailed)).Inc()
 		return ValidationFailed, nil
 	}
 
@@ -47,6 +50,7 @@ func (ing *Ingester) IngestEvent(ctx context.Context, rawJSON json.RawMessage) (
 		if err := ing.store.InsertDLQ(ctx, rawJSON, "schema_unknown", collector); err != nil {
 			return "", fmt.Errorf("insert DLQ (schema_unknown): %w", err)
 		}
+		metrics.IngestTotal.WithLabelValues(string(SchemaUnknownDLQ)).Inc()
 		return SchemaUnknownDLQ, nil
 	}
 
@@ -56,11 +60,13 @@ func (ing *Ingester) IngestEvent(ctx context.Context, rawJSON json.RawMessage) (
 	}
 	if found {
 		if existingHash == contentHash {
+			metrics.IngestTotal.WithLabelValues(string(Duplicate)).Inc()
 			return Duplicate, nil
 		}
 		if err := ing.store.InsertDLQ(ctx, rawJSON, "dedup_conflict", collector); err != nil {
 			return "", fmt.Errorf("insert DLQ (dedup_conflict): %w", err)
 		}
+		metrics.IngestTotal.WithLabelValues(string(ConflictDLQ)).Inc()
 		return ConflictDLQ, nil
 	}
 
@@ -100,6 +106,7 @@ func (ing *Ingester) IngestEvent(ctx context.Context, rawJSON json.RawMessage) (
 		return "", fmt.Errorf("advance watermark: %w", err)
 	}
 
+	metrics.IngestTotal.WithLabelValues(string(Inserted)).Inc()
 	return Inserted, nil
 }
 

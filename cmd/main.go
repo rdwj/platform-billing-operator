@@ -322,7 +322,15 @@ func main() {
 				driftInterval = d
 			}
 		}
-		promClient := drift.NewHTTPPromClient(promURL)
+		var promOpts []drift.HTTPPromOption
+		if caCertPath := os.Getenv("PROMETHEUS_CA_CERT"); caCertPath != "" {
+			promOpts = append(promOpts, drift.WithCACert(caCertPath))
+		}
+		promClient, err := drift.NewHTTPPromClient(promURL, promOpts...)
+		if err != nil {
+			setupLog.Error(err, "unable to create prometheus client")
+			os.Exit(1)
+		}
 		driftLog := slog.New(logr.ToSlogHandler(ctrl.Log.WithName("drift")))
 		driftJob := drift.New(store, promClient, mgr.GetClient(), driftLog, driftTolerancePct, driftInterval)
 		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {

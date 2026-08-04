@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -34,6 +35,7 @@ import (
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/enforcement"
+	"github.com/rdwj/platform-billing-operator/internal/metrics"
 )
 
 const (
@@ -182,6 +184,26 @@ func (r *TenantAccountReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err := r.Status().Update(ctx, &acct); err != nil {
 		return ctrl.Result{}, err
 	}
+
+	allStates := []string{
+		billingv1alpha1.StatePending, billingv1alpha1.StateActive,
+		billingv1alpha1.StateWarning, billingv1alpha1.StateGrace,
+		billingv1alpha1.StateDunning, billingv1alpha1.StateFrozen,
+	}
+	for _, s := range allStates {
+		val := float64(0)
+		if s == state {
+			val = 1
+		}
+		metrics.TenantState.WithLabelValues(acct.Name, s).Set(val)
+	}
+	if bal, err := strconv.ParseFloat(balance, 64); err == nil {
+		metrics.TenantBalance.WithLabelValues(acct.Name).Set(bal)
+	}
+	if spend, err := strconv.ParseFloat(mtdSpend, 64); err == nil {
+		metrics.TenantMTDSpend.WithLabelValues(acct.Name).Set(spend)
+	}
+
 	r.lastPatch.Store(req.String(), time.Now())
 
 	logger.Info("TenantAccount reconciled", "state", state, "balance", balance)

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
+	"github.com/rdwj/platform-billing-operator/internal/metrics"
 	"github.com/rdwj/platform-billing-operator/internal/rater"
 )
 
@@ -86,10 +87,14 @@ func (j *RatingJob) Tick(ctx context.Context) (int, error) {
 			comps, warns, now); err != nil {
 			return rated, fmt.Errorf("insert charge for %s: %w", charge.RecordID, err)
 		}
+		if amt, err := strconv.ParseFloat(charge.Total, 64); err == nil {
+			metrics.ChargeAmountTotal.WithLabelValues(charge.TenantID, ue.SKU, charge.Currency).Add(amt)
+		}
 		rated++
 	}
 
 	if rated > 0 {
+		metrics.EventsRatedTotal.Add(float64(rated))
 		j.log.Info("rated events", "count", rated, "batch", len(events))
 	}
 	return rated, nil

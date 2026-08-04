@@ -31,6 +31,7 @@ import (
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
+	"github.com/rdwj/platform-billing-operator/internal/metrics"
 )
 
 // LedgerQuerier is the subset of ledger.Store that the drift reconciler needs.
@@ -112,6 +113,13 @@ func (j *DriftJob) Tick(ctx context.Context) error {
 		// --- drift computation ---
 		driftPct := ComputeDrift(ledgerTokens, promTokens)
 		exceeded := driftPct.GreaterThan(j.tolerancePct)
+
+		if exceeded {
+			metrics.DriftExceeded.WithLabelValues(tenantID).Set(1)
+		} else {
+			metrics.DriftExceeded.WithLabelValues(tenantID).Set(0)
+		}
+		metrics.DriftPct.WithLabelValues(tenantID).Set(driftPct.InexactFloat64())
 
 		// --- persist report ---
 		sig := Sign(tenantID, windowStart, windowEnd, ledgerTokens, promTokens, driftPct.String())

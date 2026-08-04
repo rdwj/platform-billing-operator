@@ -1,0 +1,50 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    app.kubernetes.io/name: platform-billing-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: billing-rules
+  namespace: system
+spec:
+  groups:
+    - name: billing.recording
+      interval: 60s
+      rules:
+        - record: billing:revenue_per_tenant:sum
+          expr: |
+            sum by (tenant_id) (
+              increase(billing_charge_amount_total[24h])
+            )
+
+        - record: billing:mrr:sum
+          expr: |
+            sum(
+              increase(billing_charge_amount_total[30d])
+            )
+
+        - record: billing:churn_risk:ratio
+          expr: |
+            clamp_min(
+              sum by (tenant_id) (increase(billing_charge_amount_total[7d]))
+              /
+              (sum by (tenant_id) (increase(billing_charge_amount_total[7d] offset 7d)) > 0),
+              0
+            )
+
+        - record: billing:payment_failure:rate
+          expr: |
+            sum(rate(billing_psp_webhook_total{event="payment.failed"}[1h]))
+
+    - name: billing.alerts
+      rules:
+        - alert: BillingDriftExceeded
+          expr: billing_drift_exceeded == 1
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Billing drift exceeded for tenant {{ $labels.tenant_id }}"
+            description: >-
+              Drift between ledger and Prometheus token counts exceeds
+              configured tolerance for tenant {{ $labels.tenant_id }}.

@@ -30,8 +30,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
+
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
+	"github.com/rdwj/platform-billing-operator/internal/metrics"
 )
 
 // ---------------------------------------------------------------------------
@@ -204,6 +207,15 @@ func TestTick_DriftExceedsThreshold(t *testing.T) {
 	}
 	if cond.Reason != "DriftExceeded" {
 		t.Errorf("condition reason = %q, want DriftExceeded", cond.Reason)
+	}
+
+	exceeded := testutil.ToFloat64(metrics.DriftExceeded.WithLabelValues("tenant-a"))
+	if exceeded != 1 {
+		t.Errorf("DriftExceeded gauge = %f, want 1", exceeded)
+	}
+	pct := testutil.ToFloat64(metrics.DriftPct.WithLabelValues("tenant-a"))
+	if pct < 9 || pct > 10 {
+		t.Errorf("DriftPct gauge = %f, want ~9.09", pct)
 	}
 }
 

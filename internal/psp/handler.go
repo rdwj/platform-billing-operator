@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/rdwj/platform-billing-operator/internal/metrics"
 	"github.com/shopspring/decimal"
 )
 
@@ -87,6 +88,7 @@ func (h *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	metrics.PSPWebhookTotal.WithLabelValues(event.Event).Inc()
 	switch event.Event {
 	case EventPaymentSucceeded:
 		if event.Amount == "" {

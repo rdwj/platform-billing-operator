@@ -34,6 +34,7 @@ import (
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/enforcement"
+	"github.com/rdwj/platform-billing-operator/internal/metrics"
 )
 
 const (
@@ -129,6 +130,9 @@ func (r *BudgetPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		}
 
 		bp.Status.CurrentSpend = spendDec.StringFixed(6)
+		if !capAmt.IsZero() {
+			metrics.BudgetUtilization.WithLabelValues(acct.Name, bp.Name).Set(spendDec.Div(capAmt).InexactFloat64())
+		}
 
 		for _, threshold := range cap.Thresholds {
 			if alreadyFired(bp.Status.FiredThresholds, int32(capIdx), threshold.Pct) {

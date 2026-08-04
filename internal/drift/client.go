@@ -19,6 +19,7 @@ package drift
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -51,14 +52,19 @@ func WithBearerTokenFile(path string) HTTPPromOption {
 	return func(h *HTTPPromClient) { h.tokenFile = path }
 }
 
-type HTTPPromClient struct {
-	baseURL   string
-	client    *http.Client
-	token     string
-	tokenFile string
+func WithCACert(path string) HTTPPromOption {
+	return func(h *HTTPPromClient) { h.caCertPath = path }
 }
 
-func NewHTTPPromClient(baseURL string, opts ...HTTPPromOption) *HTTPPromClient {
+type HTTPPromClient struct {
+	baseURL    string
+	client     *http.Client
+	token      string
+	tokenFile  string
+	caCertPath string
+}
+
+func NewHTTPPromClient(baseURL string, opts ...HTTPPromOption) (*HTTPPromClient, error) {
 	c := &HTTPPromClient{
 		baseURL:   baseURL,
 		tokenFile: "/var/run/secrets/kubernetes.io/serviceaccount/token",
@@ -67,16 +73,26 @@ func NewHTTPPromClient(baseURL string, opts ...HTTPPromOption) *HTTPPromClient {
 		o(c)
 	}
 	if c.client == nil {
-		// In-cluster Thanos/Prometheus uses self-signed serving certs;
-		// the connection is already inside the cluster network.
+		tlsConfig := &tls.Config{}
+		if c.caCertPath != "" {
+			caCert, err := os.ReadFile(c.caCertPath)
+			if err != nil {
+				return nil, fmt.Errorf("read CA cert %s: %w", c.caCertPath, err)
+			}
+			pool := x509.NewCertPool()
+			if !pool.AppendCertsFromPEM(caCert) {
+				return nil, fmt.Errorf("no valid certificates found in %s", c.caCertPath)
+			}
+			tlsConfig.RootCAs = pool
+		} else {
+			tlsConfig.InsecureSkipVerify = true //nolint:gosec
+		}
 		c.client = &http.Client{
-			Timeout: 10 * time.Second,
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec
-			},
+			Timeout:   10 * time.Second,
+			Transport: &http.Transport{TLSClientConfig: tlsConfig},
 		}
 	}
-	return c
+	return c, nil
 }
 
 func (c *HTTPPromClient) Query(ctx context.Context, query string, ts time.Time) ([]Sample, error) {
