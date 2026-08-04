@@ -1,0 +1,27 @@
+# Stage 1: Build the React SPA
+FROM node:20-slim AS spa-builder
+WORKDIR /app
+COPY console/package.json console/package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY console/ .
+RUN npm run build
+
+# Stage 2: Build the Go BFF with the SPA embedded
+FROM golang:1.26 AS go-builder
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY --from=spa-builder /app/dist/ console/dist/
+COPY cmd/ cmd/
+COPY console/embed.go console/embed.go
+COPY api/ api/
+COPY gen/ gen/
+COPY internal/ internal/
+RUN CGO_ENABLED=0 go build -o console ./cmd/console/
+
+# Stage 3: Runtime
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=go-builder /workspace/console .
+USER 65532:65532
+ENTRYPOINT ["/console"]

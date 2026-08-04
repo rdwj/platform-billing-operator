@@ -40,6 +40,11 @@ notes.md
 # Local binaries
 bin/
 
+# Console SPA artifacts
+console/node_modules/
+console/dist/*
+!console/dist/.gitkeep
+
 # Rust/Cargo build artifacts
 cmd/capture-filter/target/
 

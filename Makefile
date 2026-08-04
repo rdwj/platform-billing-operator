@@ -184,6 +184,14 @@ ledger-svc: fmt vet ## Build ledger-svc binary.
 billctl: ## Build billctl CLI.
 	go build -o bin/billctl ./cmd/billctl/
 
+.PHONY: console
+console: fmt vet ## Build console BFF binary (requires console/dist/ from console-build).
+	go build -o bin/console ./cmd/console/
+
+.PHONY: console-build
+console-build: ## Build console SPA (output in console/dist/).
+	cd console && npm ci && npm run build
+
 .PHONY: loadgen
 loadgen: ## Build load-test harness for metering pipeline benchmarks.
 	go build -o bin/loadgen ./test/loadgen/

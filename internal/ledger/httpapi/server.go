@@ -10,7 +10,7 @@ import (
 // NewServer returns an http.Handler with billing-api routes:
 // /v1/ingest, /v1/usage, /v1/balance, /v1/adjustments, /v1/pricing,
 // /v1/keys, /v1/keys/disable, /v1/keys/enable, /v1/drift, /v1/drift/latest,
-// /v1/export, /healthz.
+// /v1/export, /v1/tenants, /healthz.
 //
 // k8sReader is a Kubernetes client.Reader used by the pricing handler to resolve
 // PriceBook CRs. It may be nil if no kubeconfig is available; in that case
@@ -23,6 +23,7 @@ func NewServer(ingester *ledger.Ingester, store *ledger.Store, k8sReader client.
 	mux.Handle("/v1/balance", &balanceHandler{store: store})
 	mux.Handle("/v1/adjustments", &adjustmentHandler{store: store})
 	mux.Handle("/v1/pricing", &pricingHandler{reader: k8sReader, defaultNS: defaultNS})
+	mux.Handle("/v1/tenants", &tenantsHandler{reader: k8sReader, defaultNS: defaultNS})
 	mux.Handle("/v1/drift", &driftHandler{store: store})
 	mux.Handle("/v1/drift/latest", &driftHandler{store: store})
 	mux.Handle("/v1/export", &exportHandler{store: store})
