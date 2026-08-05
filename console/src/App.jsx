@@ -4,7 +4,67 @@ import { DISPLAY, PAL } from './ui.jsx';
 import { Overview, Models, Tenants, TenantDetail, Plans, UsageExplorer, Billing, Cost, Metering, ApiSurface } from './screens-provider.jsx';
 import { TOverview, TModels, TUsage, TBilling, TBudgets, TKeys } from './screens-tenant.jsx';
 import Integrations from './screens-integrations.jsx';
-import { fetchTenants, fetchBalance } from './api.js';
+import { fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport } from './api.js';
+
+function fmtMoney(v) {
+  if (!v || v === '0' || v === '0.000000') return '$0.00';
+  const n = parseFloat(v);
+  if (isNaN(n)) return '---';
+  const abs = Math.abs(n);
+  const s = abs >= 1000 ? '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : abs >= 1 ? '$' + abs.toFixed(2) : '$' + abs.toFixed(4);
+  return n < 0 ? '−' + s : s;
+}
+
+function badgeColor(status) {
+  const map = { Active: 'green', Warning: 'gold', Grace: 'gold', Dunning: 'red', Frozen: 'red', Suspended: 'red', Pending: 'grey', Closed: 'grey' };
+  return map[status] || 'grey';
+}
+
+function buildTenantDetail(t, credited, frozen) {
+  const bal = t.balance ? parseFloat(t.balance) : null;
+  const crd = credited[t.tenant_id] ? 1000 : 0;
+  const adjBal = bal !== null ? bal + crd : null;
+  const burn = t.burn_per_day ? parseFloat(t.burn_per_day) : null;
+  const runway = t.runway_days ? parseFloat(t.runway_days) : null;
+  const isFrozen = frozen[t.tenant_id];
+  const st = isFrozen ? 'Frozen' : t.status;
+  return {
+    tid: t.tenant_id, name: t.name, plan: t.plan, mode: t.billing_mode || '---',
+    status: st, st: badgeColor(isFrozen ? 'Frozen' : t.status),
+    balance: adjBal !== null ? fmtMoney(String(adjBal)) : '---',
+    balColor: adjBal !== null && adjBal < 1300 ? '#B1380B' : '#151515',
+    runway: adjBal === null ? 'Invoiced tenant — no prepaid balance'
+      : adjBal === 0 ? 'Depleted' : runway ? `≈ ${runway.toFixed(1)} days of runway at ${fmtMoney(t.burn_per_day)}/day burn` : '---',
+    gaugeW: adjBal === null ? '100%' : Math.min(100, Math.round((adjBal / 25000) * 100)) + '%',
+    gaugeColor: adjBal !== null && adjBal < 1300 ? '#B1380B' : adjBal !== null && adjBal < 5000 ? '#F0AB00' : '#3D7317',
+    arState: t.reload_enabled ? 'Enabled' : adjBal === null ? 'N/A (invoiced)' : 'Off',
+    arWarn: false,
+    arThreshold: t.reload_threshold ? fmtMoney(t.reload_threshold) : '---',
+    arAmount: t.reload_amount ? fmtMoney(t.reload_amount) : '---',
+    arMethod: adjBal === null ? 'Invoice' : 'Stripe',
+    arCap: t.monthly_cap ? fmtMoney(t.monthly_cap) + ' / mo' : '---',
+    arLast: '---',
+    overrun: burn ? fmtMoney(String(Math.round(burn / 288))) : '$0',
+    mtd: fmtMoney(t.mtd_spend), burn: burn ? fmtMoney(t.burn_per_day) + '/d' : '---',
+    reload: t.reload_enabled ? 'Enabled' : 'Off',
+  };
+}
+
+function mapLedgerEntry(e) {
+  const typeMap = { charge: 'Charge', manual_credit: 'Credit', manual_debit: 'Debit', reload: 'Reload', payment_credit: 'Credit', balance_carry_in: 'Carry-in', writeoff: 'Write-off', sla_credit: 'SLA credit', promo: 'Promo' };
+  const colorMap = { charge: 'grey', manual_credit: 'blue', manual_debit: 'red', reload: 'green', payment_credit: 'green', balance_carry_in: 'blue', writeoff: 'red', sla_credit: 'blue', promo: 'purple' };
+  const amt = parseFloat(e.amount);
+  return {
+    date: new Date(e.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+    type: typeMap[e.type] || e.type,
+    detail: e.description,
+    amt: (amt >= 0 ? '+' : '') + fmtMoney(e.amount),
+    after: fmtMoney(e.balance_after),
+    c: colorMap[e.type] || 'grey',
+    amtColor: amt >= 0 ? '#204D00' : '#731F00',
+  };
+}
 
 const PROVIDER_NAV = [
   { hdr: 'Monetize' },
@@ -41,46 +101,45 @@ export default function App() {
 
   // --- API data layer ---
   const [apiTenants, setApiTenants] = useState(null);
-  const [apiBalance, setApiBalance] = useState(null);
+  const [apiLedger, setApiLedger] = useState(null);
+  const [apiBudgets, setApiBudgets] = useState(null);
+  const [apiKeys, setApiKeys] = useState(null);
+  const [apiExport, setApiExport] = useState(null);
 
-  // Fetch tenant list from BFF on mount
   useEffect(() => {
     fetchTenants().then(data => {
       if (data && data.tenants) setApiTenants(data.tenants);
     });
   }, []);
 
-  // Fetch balance when selected tenant changes
   useEffect(() => {
-    if (!tenant) { setApiBalance(null); return; }
-    fetchBalance(tenant.tid).then(data => {
-      if (data) setApiBalance(data);
-    });
-  }, [tenant?.tid]);
+    if (!tenant) {
+      setApiLedger(null);
+      setApiBudgets(null);
+      setApiKeys(null);
+      setApiExport(null);
+      return;
+    }
+    const tid = tenant.tenant_id || tenant.tid;
+    fetchLedger(tid).then(data => { if (data) setApiLedger(data); });
+    fetchBudgets(tid).then(data => { if (data) setApiBudgets(data); });
+    fetchKeys(tid).then(data => { if (data) setApiKeys(data); });
+    const now = new Date();
+    const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    fetchExport({ tenant: tid, from, to: now.toISOString() }).then(data => { if (data) setApiExport(data); });
+  }, [tenant?.tenant_id, tenant?.tid]);
 
-  const D = useMemo(() => {
-    const mock = makeData(inc);
-    // If BFF returned tenant data, attach it so screens can use it.
-    // Components still consume `D` with the same shape -- apiTenants is
-    // an additive field that screens can inspect when they're ready.
-    if (apiTenants) {
-      mock._apiTenants = apiTenants;
-    }
-    if (apiBalance) {
-      mock._apiBalance = apiBalance;
-    }
-    return mock;
-  }, [inc, apiTenants, apiBalance]);
+  const D = useMemo(() => makeData(inc), [inc]);
 
   const prov = persona === 'provider';
   const nav = prov ? PROVIDER_NAV : TENANT_NAV;
   const active = prov ? screen : tScreen;
 
-  const td = mkDetail(tenant ? D.tenants.find(x => x.tid === tenant.tid) : D.tenants[1], credited, frozen);
+  const selectedTenantApi = tenant && apiTenants ? apiTenants.find(t => t.tenant_id === (tenant.tenant_id || tenant.tid)) : null;
+  const mockTenant = tenant ? (D.tenants.find(x => x.tid === (tenant.tid || tenant.tenant_id)) || D.tenants[1]) : D.tenants[1];
+  const td = selectedTenantApi ? buildTenantDetail(selectedTenantApi, credited, frozen) : mkDetail(mockTenant, credited, frozen);
   const th = mkDetail(D.tenants[1], credited, frozen);
-  const ledgerView = (credited[td.tid]
-    ? [{ date: 'Just now', type: 'Credit', detail: 'Goodwill credit granted from provider console', amt: '+$1,000.00', after: td.balance, c: 'blue', amtColor: '#204D00' }]
-    : []).concat(D.ledger);
+  const ledgerView = apiLedger && apiLedger.entries ? apiLedger.entries.map(mapLedgerEntry) : D.ledger;
 
   const dunning = D.dunningBase.map((d, i) => ({
     ...d,
@@ -133,12 +192,13 @@ export default function App() {
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <div style={{ padding: '22px 28px 40px', maxWidth: 1320 }}>
-            {prov && screen === 'overview' && <Overview D={D} onTenant={openTenant} goMetering={() => setScreen('metering')} />}
+            {prov && screen === 'overview' && <Overview D={D} apiTenants={apiTenants} onTenant={openTenant} goMetering={() => setScreen('metering')} />}
             {prov && screen === 'models' && <Models D={D} />}
             {prov && screen === 'plans' && <Plans D={D} plan={plan} setPlan={setPlan} />}
-            {prov && screen === 'tenants' && !tenant && <Tenants D={D} onTenant={openTenant} />}
+            {prov && screen === 'tenants' && !tenant && <Tenants D={D} apiTenants={apiTenants} onTenant={openTenant} />}
             {prov && screen === 'tenants' && tenant && (
               <TenantDetail D={D} td={td} tab={tab} setTab={setTab} ledger={ledgerView}
+                apiBudgets={apiBudgets} apiKeys={apiKeys} apiExport={apiExport}
                 back={() => setTenant(null)} goPlans={() => { setScreen('plans'); setTenant(null); }}
                 grantCredit={() => !credited[td.tid] && setCredited({ ...credited, [td.tid]: true })}
                 grantLabel={credited[td.tid] ? 'Credited +$1,000' : 'Grant credit'}

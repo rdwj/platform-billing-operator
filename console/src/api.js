@@ -41,6 +41,22 @@ export function fetchExport(params) {
   return fetchJSON(`/api/export?${qs}`);
 }
 
+export function fetchLedger(tenantId, limit = 50) {
+  return fetchJSON(`/api/ledger?tenant=${encodeURIComponent(tenantId)}&limit=${limit}`);
+}
+
+export function fetchBudgets(tenantId) {
+  return fetchJSON(`/api/budgets?tenant=${encodeURIComponent(tenantId)}`);
+}
+
+export function fetchKeys(tenantId) {
+  return fetchJSON(`/api/keys?tenant=${encodeURIComponent(tenantId)}`);
+}
+
+export function fetchAdjustments(tenantId, limit = 50) {
+  return fetchJSON(`/api/adjustments?tenant=${encodeURIComponent(tenantId)}&limit=${limit}`);
+}
+
 export function fetchWalkthroughs() {
   return fetchJSON('/api/walkthroughs');
 }

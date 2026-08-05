@@ -2,14 +2,13 @@ import React from 'react';
 import { Card, PageH, SecTitle, MiniLabel, Kpi, Badge, Btn, THead, TRow, Mono, Dim, Progress, Bars, Stacked, Pre, DISPLAY, MONO, PAL } from './ui.jsx';
 import { planYaml, jsonUsage, jsonEvent, jsonWebhook } from './data.js';
 
-export function Overview({ D, onTenant, goMetering }) {
-  const deltas = [
-    { d: '+12%', c: '#204D00' }, { d: '+31%', c: '#204D00' }, { d: '+4%', c: '#204D00' },
-    { d: '−3%', c: '#731F00' }, { d: '+19%', c: '#204D00' }
-  ];
+export function Overview({ D, apiTenants, onTenant, goMetering }) {
+  const topTenants = apiTenants
+    ? apiTenants.map(t => ({ ...t, tid: t.tenant_id, mtdN: parseFloat(t.mtd_spend || '0') })).sort((a, b) => b.mtdN - a.mtdN).slice(0, 5)
+    : D.tenants.slice(0, 5);
   return (
     <div data-screen-label="Revenue overview">
-      <PageH title="Revenue overview" sub="July 2026 month-to-date · all geos · USD-settled" />
+      <PageH title="Revenue overview" sub="Month-to-date · all geos · USD-settled" />
       <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>{D.kpis.map(k => <Kpi key={k.label} {...k} />)}</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 14, marginBottom: 14 }}>
         <Card style={{ padding: '18px 20px' }}>
@@ -39,11 +38,10 @@ export function Overview({ D, onTenant, goMetering }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
         <Card>
           <SecTitle style={{ marginBottom: 10 }}>Top tenants (MTD)</SecTitle>
-          {D.tenants.slice(0, 5).map((t, i) => (
-            <div key={t.tid} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: '1px solid #f5f5f5', fontSize: 13 }}>
+          {topTenants.map(t => (
+            <div key={t.tid || t.tenant_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: '1px solid #f5f5f5', fontSize: 13 }}>
               <a href="#" onClick={e => { e.preventDefault(); onTenant(t); }} style={{ flex: 1, fontWeight: 500 }}>{t.name}</a>
-              <Mono>{t.mtd}</Mono>
-              <div style={{ width: 52, textAlign: 'right', fontSize: 12, color: deltas[i].c }}>{deltas[i].d}</div>
+              <Mono>{t.mtd || fmtMoney(t.mtd_spend)}</Mono>
             </div>
           ))}
         </Card>
@@ -151,14 +149,46 @@ export function Models({ D }) {
   );
 }
 
-export function Tenants({ D, onTenant }) {
+function fmtMoney(v) {
+  if (!v || v === '0' || v === '0.000000') return '$0.00';
+  const n = parseFloat(v);
+  if (isNaN(n)) return '---';
+  const abs = Math.abs(n);
+  const s = '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n < 0 ? '−' + s : s;
+}
+
+function badgeColor(status) {
+  return { Active: 'green', Warning: 'gold', Grace: 'gold', Dunning: 'red', Frozen: 'red', Suspended: 'red', Pending: 'grey', Closed: 'grey' }[status] || 'grey';
+}
+
+function mapApiTenant(t) {
+  const bal = t.balance ? parseFloat(t.balance) : null;
+  return {
+    tid: t.tenant_id, name: t.name, plan: t.plan, mode: t.billing_mode || '---',
+    balance: bal !== null ? fmtMoney(t.balance) : '---',
+    balColor: bal !== null && bal < 1300 ? '#B1380B' : '#151515',
+    reload: t.reload_enabled ? 'Enabled' : 'Off',
+    burn: t.burn_per_day ? fmtMoney(t.burn_per_day) + '/d' : '---',
+    mtd: fmtMoney(t.mtd_spend), status: t.status || 'Pending', st: badgeColor(t.status),
+    tenant_id: t.tenant_id,
+    ...t,
+  };
+}
+
+export function Tenants({ D, apiTenants, onTenant }) {
+  const tenants = apiTenants ? apiTenants.map(mapApiTenant) : D.tenants;
+  const activeCount = tenants.filter(t => t.status === 'Active').length;
+  const lowBal = tenants.filter(t => t.st === 'gold' || (t.balColor === '#B1380B')).length;
+  const frozenCount = tenants.filter(t => t.status === 'Frozen').length;
+  const sub = `${activeCount} active${lowBal ? ` · ${lowBal} low balance` : ''}${frozenCount ? ` · ${frozenCount} frozen` : ''} · click a tenant to drill in`;
   const cols = '1.8fr .9fr 1fr 1fr 1.6fr .9fr 1fr .9fr';
   return (
     <div data-screen-label="Tenants">
-      <PageH title="Tenants" sub="62 active · 4 low balance · 1 frozen · click a tenant to drill in" right={<Btn primary>Invite tenant</Btn>} />
+      <PageH title="Tenants" sub={sub} right={<Btn primary>Invite tenant</Btn>} />
       <Card style={{ padding: 0, overflow: 'hidden' }}>
         <THead cols={cols} labels={['Tenant', 'Plan', 'Billing mode', 'Balance', 'Auto-reload', 'Burn / day', 'MTD spend', 'Status']} />
-        {D.tenants.map(t => (
+        {tenants.map(t => (
           <TRow key={t.tid} cols={cols} onClick={() => onTenant(t)}>
             <div style={{ fontWeight: 600, color: '#0066CC' }}>{t.name}</div><div>{t.plan}</div><Dim>{t.mode}</Dim>
             <Mono style={{ color: t.balColor }}>{t.balance}</Mono>
@@ -172,7 +202,7 @@ export function Tenants({ D, onTenant }) {
   );
 }
 
-export function TenantDetail({ D, td, tab, setTab, ledger, back, grantCredit, grantLabel, toggleFreeze, freezeLabel, goPlans }) {
+export function TenantDetail({ D, td, tab, setTab, ledger, apiBudgets, apiKeys, apiExport, back, grantCredit, grantLabel, toggleFreeze, freezeLabel, goPlans }) {
   const tabs = [['balance', 'Balance & auto-reload'], ['budgets', 'Budgets & alerts'], ['keys', 'API keys'], ['chargeback', 'Chargeback']];
   return (
     <div data-screen-label="Tenant detail">
@@ -222,7 +252,7 @@ export function TenantDetail({ D, td, tab, setTab, ledger, back, grantCredit, gr
         <LedgerTable ledger={ledger} />
       </>}
 
-      {tab === 'budgets' && <BudgetsPanel D={D} />}
+      {tab === 'budgets' && <BudgetsPanel D={D} apiBudgets={apiBudgets} />}
 
       {tab === 'keys' && <>
         <Card style={{ padding: 0, overflow: 'hidden' }}>
@@ -230,7 +260,7 @@ export function TenantDetail({ D, td, tab, setTab, ledger, back, grantCredit, gr
             <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>API keys</div>
             <div style={{ marginLeft: 'auto' }}><Btn primary small>Create key</Btn></div>
           </div>
-          <KeysTable keys={D.keys} />
+          {apiKeys && apiKeys.keys ? <ApiKeysTable keys={apiKeys.keys} /> : <KeysTable keys={D.keys} />}
         </Card>
         <div style={{ background: '#E0F0FF', borderRadius: 8, padding: '12px 16px', fontSize: 12.5, color: '#003366', marginTop: 12 }}>
           Keys map to Authorino identities; scopes and per-key limits compile to AuthPolicy claims consumed by TokenRateLimitPolicy predicates.
@@ -240,19 +270,41 @@ export function TenantDetail({ D, td, tab, setTab, ledger, back, grantCredit, gr
       {tab === 'chargeback' && <>
         <Card style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', padding: '14px 18px' }}>
-            <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Chargeback / showback — July MTD</div>
+            <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Chargeback / showback — MTD</div>
             <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
               <Btn small>Export CSV</Btn><Btn small>Export FOCUS 1.2</Btn><Btn small>Schedule…</Btn>
             </div>
           </div>
-          <THead cols="1fr 1.4fr 1fr 1fr 1fr 1fr .8fr" labels={['Cost center', 'Project', 'Input tok', 'Output tok', 'Reasoning', 'Cost', 'Share']} />
-          {D.chargeback.map(c => (
-            <TRow key={c.project} cols="1fr 1.4fr 1fr 1fr 1fr 1fr .8fr">
-              <Mono>{c.cc}</Mono><div style={{ fontWeight: 600 }}>{c.project}</div>
-              <Mono>{c.tin}</Mono><Mono>{c.tout}</Mono><Mono>{c.trsn}</Mono><Mono>{c.cost}</Mono>
-              <div><Progress w={c.w} h={7} /></div>
-            </TRow>
-          ))}
+          {apiExport && apiExport.rows ? (
+            <>
+              <THead cols="2fr 1fr 1fr 1fr .8fr" labels={['SKU', 'Input tok', 'Output tok', 'Billed cost', 'Share']} />
+              {(() => {
+                const total = apiExport.rows.reduce((s, x) => s + parseFloat(x.billed_cost || '0'), 0);
+                return apiExport.rows.map((r, i) => {
+                  const share = total > 0 ? Math.round((parseFloat(r.billed_cost || '0') / total) * 100) : 0;
+                  return (
+                    <TRow key={i} cols="2fr 1fr 1fr 1fr .8fr">
+                      <div style={{ fontWeight: 600 }}>{r.sku_id || r.service_name || '---'}</div>
+                      <Mono>{r.pricing_quantity || '---'}</Mono><Mono>{r.consumed_quantity || '---'}</Mono>
+                      <Mono>{fmtMoney(r.billed_cost)}</Mono>
+                      <div><Progress w={share + '%'} h={7} /></div>
+                    </TRow>
+                  );
+                });
+              })()}
+            </>
+          ) : (
+            <>
+              <THead cols="1fr 1.4fr 1fr 1fr 1fr 1fr .8fr" labels={['Cost center', 'Project', 'Input tok', 'Output tok', 'Reasoning', 'Cost', 'Share']} />
+              {D.chargeback.map(c => (
+                <TRow key={c.project} cols="1fr 1.4fr 1fr 1fr 1fr 1fr .8fr">
+                  <Mono>{c.cc}</Mono><div style={{ fontWeight: 600 }}>{c.project}</div>
+                  <Mono>{c.tin}</Mono><Mono>{c.tout}</Mono><Mono>{c.trsn}</Mono><Mono>{c.cost}</Mono>
+                  <div><Progress w={c.w} h={7} /></div>
+                </TRow>
+              ))}
+            </>
+          )}
         </Card>
         <Dim style={{ marginTop: 10 }}>FOCUS export maps token usage to the FinOps Open Cost & Usage Specification so tenants can ingest into Cloudability, CloudHealth, etc. Attribution key: API key → project → cost center (set per key).</Dim>
       </>}
@@ -295,12 +347,85 @@ export function KeysTable({ keys }) {
   </>);
 }
 
-export function BudgetsPanel({ D, addButtons }) {
+function ApiKeysTable({ keys }) {
+  const cols = '1.5fr 1fr 1fr 1fr .8fr';
+  return (<>
+    <THead cols={cols} labels={['Name', 'Source', 'Created', 'Status', '']} />
+    {keys.map(k => (
+      <TRow key={k.key_name} cols={cols}>
+        <div style={{ fontWeight: 600 }}>{k.key_name}</div>
+        <Dim>{k.source || '---'}</Dim>
+        <Dim>{k.created_at ? new Date(k.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '---'}</Dim>
+        <div><Badge c={k.enabled ? 'green' : 'red'}>{k.enabled ? 'Active' : 'Disabled'}</Badge></div>
+        <div style={{ display: 'flex', gap: 10, fontSize: 12 }}>
+          <a href="#" onClick={e => e.preventDefault()}>Rotate</a>
+          <a href="#" onClick={e => e.preventDefault()} style={{ color: '#B1380B' }}>Revoke</a>
+        </div>
+      </TRow>
+    ))}
+  </>);
+}
+
+export function BudgetsPanel({ D, addButtons, apiBudgets }) {
+  const hasBudgets = apiBudgets && apiBudgets.budgets && apiBudgets.budgets.length > 0;
+  if (hasBudgets) {
+    const budgets = apiBudgets.budgets;
+    const alertRules = [];
+    for (const bp of budgets) {
+      for (const cap of (bp.caps || [])) {
+        for (const th of (cap.thresholds || [])) {
+          alertRules.push({
+            when: `${cap.period} spend hits ${th.pct}% of ${fmtMoney(cap.amount)}`,
+            then: th.action === 'Notify' ? 'Send webhook alert to configured endpoints' : th.action === 'Freeze' ? 'Freeze tenant API keys' : `${th.action} enforcement`,
+            fired: (bp.fired_thresholds || []).some(ft => ft.pct === th.pct),
+          });
+        }
+      }
+    }
+    return (
+      <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 14 }}>
+        <Card style={{ padding: '18px 20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+            <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Budgets</div>
+            {addButtons && <div style={{ marginLeft: 'auto' }}><Btn small>Add budget</Btn></div>}
+          </div>
+          {budgets.flatMap(bp => (bp.caps || []).map(cap => {
+            const spend = parseFloat(bp.current_spend || '0');
+            const capAmt = parseFloat(cap.amount || '1');
+            const pct = capAmt > 0 ? Math.min(100, Math.round((spend / capAmt) * 100)) : 0;
+            const color = pct > 90 ? '#B1380B' : pct > 70 ? '#F0AB00' : '#3D7317';
+            return (
+              <div key={bp.name + cap.period} style={{ padding: '10px 0', borderTop: '1px solid #f5f5f5' }}>
+                <div style={{ display: 'flex', fontSize: 13 }}>
+                  <div style={{ fontWeight: 600 }}>{bp.name} ({cap.period})</div>
+                  <Mono style={{ marginLeft: 'auto' }}>{fmtMoney(bp.current_spend)} / {fmtMoney(cap.amount)}</Mono>
+                </div>
+                <div style={{ marginTop: 8 }}><Progress w={pct + '%'} color={color} /></div>
+                <div style={{ fontSize: 11, color: '#6a6e73', marginTop: 5 }}>
+                  {pct}% utilized · {cap.thresholds.length} threshold{cap.thresholds.length !== 1 ? 's' : ''} configured
+                </div>
+              </div>
+            );
+          }))}
+        </Card>
+        <Card style={{ padding: '18px 20px' }}>
+          <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Alert rules</div>
+          {alertRules.length > 0 ? alertRules.map(r => (
+            <div key={r.when} style={{ display: 'flex', gap: 10, padding: '9px 0', borderTop: '1px solid #f5f5f5', fontSize: 12.5, lineHeight: 1.45 }}>
+              <div style={{ flex: 1 }}><b>{r.when}</b><div style={{ color: '#6a6e73', marginTop: 2 }}>{r.then}</div></div>
+              <Badge c={r.fired ? 'gold' : 'green'} style={{ height: 'fit-content' }}>{r.fired ? 'Fired' : 'On'}</Badge>
+            </div>
+          )) : <Dim>No budget thresholds configured</Dim>}
+          <div style={{ marginTop: 12 }}><Btn small>Add rule</Btn></div>
+        </Card>
+      </div>
+    );
+  }
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 14 }}>
       <Card style={{ padding: '18px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
-          <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Project budgets — July</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Project budgets</div>
           {addButtons && <div style={{ marginLeft: 'auto' }}><Btn small>Add budget</Btn></div>}
         </div>
         {D.budgets.map(b => (
