@@ -1,5 +1,10 @@
-# GPU-only PriceBook sample — standalone GPU pricing for GPUaaS metering.
+# GPU PriceBook sample — usage-based and reservation tier pricing for GPUaaS.
 # See also billing_v1alpha1_pricebook.yaml for the mixed MaaS+GPU pb-standard.
+#
+# Three pricing tiers per SKU:
+#   - Usage-based (per-gpu-second): charged via the G0 collector for active allocations
+#   - Guaranteed reservation (per-gpu-month): committed-use, billed regardless of utilization
+#   - Preemptible reservation (per-gpu-month): Spot-like discount, evictable
 apiVersion: billing.opendatahub.io/v1alpha1
 kind: PriceBook
 metadata:
@@ -9,6 +14,7 @@ spec:
   effectiveFrom: "2026-09-01T00:00:00Z"
   noticeDays: 30
   skus:
+    # --- Usage-based (allocation interval billing via G0 collector) ---
     - sku: h200
       unit: per-gpu-second
       geo: ""
@@ -19,3 +25,25 @@ spec:
       geo: ""
       rates:
         gpu_seconds: "0.001250"       # $4.50/hr / 3600
+    # --- Guaranteed reservations (committed-use, billed per month) ---
+    - sku: h200-guaranteed
+      unit: per-gpu-month
+      geo: ""
+      rates:
+        gpu_months: "3000.000000"     # $3,000/GPU/month — full committed rate
+    - sku: h200-mig-3g.40gb-guaranteed
+      unit: per-gpu-month
+      geo: ""
+      rates:
+        gpu_months: "1200.000000"     # $1,200/GPU/month
+    # --- Preemptible reservations (Spot-like discount, evictable) ---
+    - sku: h200-preemptible
+      unit: per-gpu-month
+      geo: ""
+      rates:
+        gpu_months: "900.000000"      # $900/GPU/month — 70% discount vs guaranteed
+    - sku: h200-mig-3g.40gb-preemptible
+      unit: per-gpu-month
+      geo: ""
+      rates:
+        gpu_months: "360.000000"      # $360/GPU/month — 70% discount

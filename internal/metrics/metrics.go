@@ -104,6 +104,21 @@ var (
 		},
 		[]string{"tenant"},
 	)
+
+	ReservationChargesTotal = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "billing_reservation_charges_total",
+			Help: "Total number of reservation charges emitted.",
+		},
+	)
+
+	ReservationChargeAmountTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "billing_reservation_charge_amount_total",
+			Help: "Cumulative reservation charge amount by tenant, SKU, and currency.",
+		},
+		[]string{labelTenantID, "sku", "currency"},
+	)
 )
 
 func init() {
@@ -120,5 +135,7 @@ func init() {
 		BudgetUtilization,
 		InvoicesFinalized,
 		InvoiceErrors,
+		ReservationChargesTotal,
+		ReservationChargeAmountTotal,
 	)
 }

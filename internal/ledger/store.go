@@ -291,11 +291,29 @@ func (s *Store) InsertCharge(ctx context.Context, recordID, tenantID, priceBook 
 
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO charges (record_id, tenant_id, price_book, price_book_rev,
-			amount, currency, components, warnings, rated_at)
-		VALUES ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9)
+			amount, currency, components, warnings, rated_at, source)
+		VALUES ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9, 'usage')
 		ON CONFLICT (record_id) DO NOTHING`,
 		recordID, tenantID, priceBook, priceBookRev,
 		amount, currency, components, warnings, ratedAt,
+	)
+	return err
+}
+
+// InsertReservationCharge writes a reservation charge row. The idempotency key
+// is reservation UID + period (e.g. "resv-abc123-2026-08"). Duplicate inserts
+// are silently ignored via ON CONFLICT DO NOTHING.
+func (s *Store) InsertReservationCharge(ctx context.Context, recordID, tenantID, priceBook string,
+	priceBookRev int, amount, currency string, components json.RawMessage,
+	chargedAt time.Time) error {
+
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO charges (record_id, tenant_id, price_book, price_book_rev,
+			amount, currency, components, warnings, rated_at, source)
+		VALUES ($1, $2, $3, $4, $5::numeric, $6, $7, '[]'::jsonb, $8, 'reservation')
+		ON CONFLICT (record_id) DO NOTHING`,
+		recordID, tenantID, priceBook, priceBookRev,
+		amount, currency, components, chargedAt,
 	)
 	return err
 }

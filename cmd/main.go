@@ -49,6 +49,7 @@ import (
 	"github.com/rdwj/platform-billing-operator/internal/metering/gpu"
 	"github.com/rdwj/platform-billing-operator/internal/rater"
 	raterjob "github.com/rdwj/platform-billing-operator/internal/rater/job"
+	rescharging "github.com/rdwj/platform-billing-operator/internal/reservation/charging"
 	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -337,6 +338,27 @@ func main() {
 			}
 		})); err != nil {
 			setupLog.Error(err, "unable to add rating job")
+			os.Exit(1)
+		}
+		// --- Reservation charging job ---
+		chargingLog := slog.New(logr.ToSlogHandler(ctrl.Log.WithName("reservation-charging")))
+		chargingJob := rescharging.New(mgr.GetClient(), store, consoleNS, chargingLog)
+		if err := mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+			clog := ctrl.Log.WithName("reservation-charging")
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return nil
+				case <-ticker.C:
+					if _, err := chargingJob.Tick(ctx); err != nil {
+						clog.Error(err, "reservation charging tick failed")
+					}
+				}
+			}
+		})); err != nil {
+			setupLog.Error(err, "unable to add reservation charging job")
 			os.Exit(1)
 		}
 		// --- Drift reconciler ---
