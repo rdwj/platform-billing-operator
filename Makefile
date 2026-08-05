@@ -327,6 +327,10 @@ demo-m4: ## Run M4 demo (PSP integration)
 demo-g0: ## Run G0 demo (GPUaaS metering + unified wallet)
 	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-g0.sh
 
+.PHONY: demo-g1
+demo-g1: ## Run G1 demo (GPU enforcement via Kueue — Drain/Preempt/unified wallet)
+	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-g1.sh
+
 .PHONY: demo-m5
 demo-m5: ## Run M5 demo (Reconciler + Budgets + Exports)
 	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-m5.sh

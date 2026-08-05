@@ -404,9 +404,15 @@ func main() {
 	if collectorURL := os.Getenv("KUEUE_COLLECTOR_LEDGER_URL"); collectorURL != "" {
 		gpuLog := ctrl.Log.WithName("gpu-collector")
 		gpuSender := gpu.NewHTTPSender(collectorURL)
+		collectorInterval := 1 * time.Hour
+		if raw := os.Getenv("KUEUE_COLLECTOR_INTERVAL"); raw != "" {
+			if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+				collectorInterval = d
+			}
+		}
 		gpuCollector := gpu.NewCollector(mgr.GetClient(), gpuLog, gpu.CollectorConfig{
 			LedgerIngestURL:  collectorURL,
-			IntervalDuration: 1 * time.Hour,
+			IntervalDuration: collectorInterval,
 			CollectorVersion: "0.0.1",
 			DefaultGeo:       os.Getenv("COLLECTOR_DEFAULT_GEO"),
 		}, gpuSender)

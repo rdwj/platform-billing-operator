@@ -83,6 +83,44 @@ spec:
   clusterQueue: gpu-cluster-queue
 EOF
 
+# ---------- Per-tenant ClusterQueues for enforcement (G1+) ----------
+info "Creating per-tenant ClusterQueues for enforcement"
+
+create_tenant_cq() {
+  local tenant="$1" gpu_quota="${2:-4}"
+  kctl apply -f - <<EOFCQ
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: gpu-cq-${tenant}
+  labels:
+    billing.opendatahub.io/tenant-id: "${tenant}"
+spec:
+  resourceGroups:
+    - coveredResources: ["cpu", "memory", "nvidia.com/gpu"]
+      flavors:
+        - name: gpu-h200
+          resources:
+            - name: cpu
+              nominalQuota: 8
+            - name: memory
+              nominalQuota: 32Gi
+            - name: "nvidia.com/gpu"
+              nominalQuota: ${gpu_quota}
+EOFCQ
+}
+
+create_tenant_cq "ten-helix" 4
+
+kctl apply -n "$DEMO_NS" -f - <<'EOF'
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: LocalQueue
+metadata:
+  name: gpu-tenant-queue
+spec:
+  clusterQueue: gpu-cq-ten-helix
+EOF
+
 # ---------- Tenant annotation ----------
 info "Annotating demo namespace for tenant mapping"
 kctl annotate namespace "$DEMO_NS" billing.opendatahub.io/tenant-id=ten-helix --overwrite
@@ -92,6 +130,8 @@ info "Kueue installation complete"
 echo "  Context:        ${CLUSTER_CONTEXT}"
 echo "  Kueue:          v${KUEUE_VERSION}"
 echo "  ResourceFlavor: gpu-h200"
-echo "  ClusterQueue:   gpu-cluster-queue"
-echo "  LocalQueue:     team-ml-batch (namespace: ${DEMO_NS})"
+echo "  ClusterQueue:   gpu-cluster-queue (shared, G0 compat)"
+echo "  ClusterQueue:   gpu-cq-ten-helix (per-tenant, labeled)"
+echo "  LocalQueue:     team-ml-batch -> gpu-cluster-queue (namespace: ${DEMO_NS})"
+echo "  LocalQueue:     gpu-tenant-queue -> gpu-cq-ten-helix (namespace: ${DEMO_NS})"
 echo "  Tenant:         ten-helix"
