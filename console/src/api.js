@@ -57,6 +57,14 @@ export function fetchAdjustments(tenantId, limit = 50) {
   return fetchJSON(`/api/adjustments?tenant=${encodeURIComponent(tenantId)}&limit=${limit}`);
 }
 
+export function fetchPlans() {
+  return fetchJSON('/api/plans');
+}
+
+export function fetchPriceBooks() {
+  return fetchJSON('/api/pricebooks');
+}
+
 export function fetchWalkthroughs() {
   return fetchJSON('/api/walkthroughs');
 }

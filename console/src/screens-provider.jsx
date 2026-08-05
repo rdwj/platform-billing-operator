@@ -79,68 +79,128 @@ export function Overview({ D, apiTenants, onTenant, goMetering }) {
   );
 }
 
-export function Models({ D }) {
-  const cols = '2fr 1.4fr 1.3fr .7fr .7fr .8fr .7fr .8fr .7fr .6fr';
+function fmtRate(r) {
+  if (!r) return '---';
+  const n = parseFloat(r);
+  return isNaN(n) ? '---' : '$' + n.toFixed(2);
+}
+
+function mapPriceBookToModels(pb) {
+  return (pb.skus || []).map(s => ({
+    name: s.sku,
+    geo: s.geo || '---',
+    pin: fmtRate(s.rates?.prompt_tokens),
+    pout: fmtRate(s.rates?.completion_tokens),
+    prsn: fmtRate(s.rates?.reasoning_tokens),
+    pcache: fmtRate(s.rates?.cached_tokens),
+    ver: pb.name,
+  }));
+}
+
+function mapPriceBookGeoRates(pb) {
+  const byModel = {};
+  for (const s of (pb.skus || [])) {
+    if (!s.geo) continue;
+    const key = s.geo;
+    if (!byModel[key]) byModel[key] = { geo: key };
+    byModel[key].pin = fmtRate(s.rates?.prompt_tokens);
+    byModel[key].pout = fmtRate(s.rates?.completion_tokens);
+    byModel[key].prsn = fmtRate(s.rates?.reasoning_tokens);
+    byModel[key].pcache = fmtRate(s.rates?.cached_tokens);
+  }
+  return Object.values(byModel);
+}
+
+export function Models({ D, apiPriceBooks }) {
+  const pb = apiPriceBooks && apiPriceBooks.length > 0 ? apiPriceBooks[0] : null;
+  const models = pb ? mapPriceBookToModels(pb) : D.models;
+  const geoRates = pb ? mapPriceBookGeoRates(pb) : D.geoRates;
+  const volTiers = pb && pb.volumeTiers ? pb.volumeTiers.map(vt => ({
+    band: `≥ ${fmtTokens(vt.thresholdTokens)} tokens / mo`,
+    disc: `-${vt.discountPct}%`,
+  })) : D.volTiers;
+  const committed = pb && pb.committedUse ? pb.committedUse.map(cu => ({
+    band: `Reserved ${cu.tokensPerSecond} TPS (${cu.name})`,
+    price: fmtMoney(cu.monthlyPrice) + ' /mo',
+  })) : D.committed;
+  const pbName = pb ? pb.name : 'llama-4-maverick-fp8';
+  const pbEffective = pb ? pb.effectiveFrom?.slice(0, 10) : '2026-03-15';
+  const pbState = pb ? pb.state : 'Active';
+
+  const cols = pb ? '2fr .7fr .7fr .8fr .7fr .6fr' : '2fr 1.4fr 1.3fr .7fr .7fr .8fr .7fr .8fr .7fr .6fr';
+  const headers = pb
+    ? ['SKU', 'Input', 'Output', 'Reasoning', 'Cached', 'Price bk']
+    : ['Model', 'Serving', 'Geos', 'Input', 'Output', 'Reasoning', 'Cached', 'Margin', 'Status', 'Price bk'];
   return (
     <div data-screen-label="Models & pricing">
       <PageH title="Model catalog & pricing" sub="A SKU is model × geo × price version. Rates are per 1M tokens." right={<Btn primary>Add model</Btn>} />
       <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
-        <THead cols={cols} labels={['Model', 'Serving', 'Geos', 'Input', 'Output', 'Reasoning', 'Cached', 'Margin', 'Status', 'Price bk']} />
-        {D.models.map(m => (
-          <TRow key={m.name} cols={cols}>
-            <div style={{ fontWeight: 600 }}>{m.name}</div><Dim>{m.kind}</Dim><Dim>{m.geos}</Dim>
+        <THead cols={cols} labels={headers} />
+        {models.map((m, i) => (
+          <TRow key={m.name + (m.geo || '') + i} cols={cols}>
+            <div style={{ fontWeight: 600 }}>{m.name}{m.geo && m.geo !== '---' ? <Dim style={{ fontWeight: 400, marginLeft: 6 }}>({m.geo})</Dim> : null}</div>
+            {!pb && <><Dim>{m.kind}</Dim><Dim>{m.geos}</Dim></>}
             <Mono>{m.pin}</Mono><Mono>{m.pout}</Mono><Mono>{m.prsn}</Mono><Mono>{m.pcache}</Mono>
-            <div style={{ fontSize: 12 }}>{m.margin}</div>
-            <div><Badge c={m.st}>{m.status}</Badge></div>
+            {!pb && <><div style={{ fontSize: 12 }}>{m.margin}</div><div><Badge c={m.st}>{m.status}</Badge></div></>}
             <Dim>{m.ver}</Dim>
           </TRow>
         ))}
       </Card>
       <Card style={{ padding: 20 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-          <div style={{ fontFamily: DISPLAY, fontSize: 16, fontWeight: 700 }}>Price book — llama-4-maverick-fp8</div>
-          <Badge c="blue">v2 · effective 2026-03-15</Badge>
-          <a href="#" onClick={e => e.preventDefault()} style={{ marginLeft: 'auto', fontSize: 13 }}>Draft v3 (effective 2026-08-01)</a>
+          <div style={{ fontFamily: DISPLAY, fontSize: 16, fontWeight: 700 }}>Price book — {pbName}</div>
+          <Badge c={pbState === 'Active' ? 'blue' : 'grey'}>{pbState} · effective {pbEffective}</Badge>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 20, marginTop: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: geoRates.length > 0 ? '1.2fr 1fr 1fr' : '1fr 1fr', gap: 20, marginTop: 16 }}>
+          {geoRates.length > 0 && (
+            <div>
+              <MiniLabel>Geo variants</MiniLabel>
+              {geoRates.map(g => (
+                <div key={g.geo} style={{ border: '1px solid #e8e8e8', borderRadius: 6, padding: '10px 14px', margin: '8px 0' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>{g.geo}</div>
+                  <div style={{ display: 'flex', gap: 14, marginTop: 6, fontFamily: MONO, fontSize: 12, color: '#4d4d4d' }}>
+                    <div>in {g.pin}</div><div>out {g.pout}</div><div>rsn {g.prsn}</div><div>cached {g.pcache}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           <div>
-            <MiniLabel>Geo variants</MiniLabel>
-            {D.geoRates.map(g => (
-              <div key={g.geo} style={{ border: '1px solid #e8e8e8', borderRadius: 6, padding: '10px 14px', margin: '8px 0' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, fontWeight: 600 }}>
-                  <div>{g.geo}</div><Dim style={{ fontWeight: 400 }}>margin {g.margin}</Dim>
+            {volTiers.length > 0 && <>
+              <MiniLabel>Volume discounts (monthly)</MiniLabel>
+              {volTiers.map(v => (
+                <div key={v.band} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 2px', borderBottom: '1px solid #f0f0f0', fontSize: 13 }}>
+                  <div>{v.band}</div><div style={{ fontWeight: 600 }}>{v.disc}</div>
                 </div>
-                <div style={{ display: 'flex', gap: 14, marginTop: 6, fontFamily: MONO, fontSize: 12, color: '#4d4d4d' }}>
-                  <div>in {g.pin}</div><div>out {g.pout}</div><div>rsn {g.prsn}</div><div>cached {g.pcache}</div>
+              ))}
+            </>}
+            {committed.length > 0 && <>
+              <div style={{ margin: '16px 0 8px' }}><MiniLabel>Committed use</MiniLabel></div>
+              {committed.map(c => (
+                <div key={c.band} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 2px', borderBottom: '1px solid #f0f0f0', fontSize: 13 }}>
+                  <div>{c.band}</div><Mono style={{ fontWeight: 600 }}>{c.price}</Mono>
                 </div>
-              </div>
-            ))}
-            <Dim>eu-central premium covers Frankfurt GPU cost + data residency.</Dim>
+              ))}
+            </>}
+            {volTiers.length === 0 && committed.length === 0 && <Dim>No volume discounts or committed use tiers configured.</Dim>}
           </div>
           <div>
-            <MiniLabel>Volume discounts (monthly)</MiniLabel>
-            {D.volTiers.map(v => (
-              <div key={v.band} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 2px', borderBottom: '1px solid #f0f0f0', fontSize: 13 }}>
-                <div>{v.band}</div><div style={{ fontWeight: 600 }}>{v.disc}</div>
-              </div>
-            ))}
-            <div style={{ margin: '16px 0 8px' }}><MiniLabel>Committed use</MiniLabel></div>
-            {D.committed.map(c => (
-              <div key={c.band} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 2px', borderBottom: '1px solid #f0f0f0', fontSize: 13 }}>
-                <div>{c.band}</div><Mono style={{ fontWeight: 600 }}>{c.price}</Mono>
-              </div>
-            ))}
-          </div>
-          <div>
-            <MiniLabel>Version history</MiniLabel>
-            {D.priceVersions.map(p => (
-              <div key={p.tag} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: '1px solid #f0f0f0', fontSize: 12, lineHeight: 1.45 }}>
-                <Badge c={p.c} style={{ height: 'fit-content' }}>{p.tag}</Badge>
-                <div>{p.text}</div>
-              </div>
-            ))}
-            <div style={{ background: '#FDF7E7', borderRadius: 6, padding: '10px 12px', fontSize: 12, color: '#73480B', marginTop: 10 }}>
-              4 tenants grandfathered on v2 until 2026-11-01 per contract. Price changes require 30-day notice (webhook <span style={{ fontFamily: MONO }}>price.changed</span>).
+            <MiniLabel>PriceBook details</MiniLabel>
+            <div style={{ padding: '8px 0', fontSize: 12.5, lineHeight: 1.5, color: '#4d4d4d' }}>
+              {pb ? <>
+                <div><b>Currency:</b> {pb.currency}</div>
+                <div><b>SKUs:</b> {pb.skuCount}</div>
+                <div><b>Active tenants:</b> {pb.activeTenants}</div>
+                {pb.providerFaultPolicy && <div><b>Provider fault:</b> {pb.providerFaultPolicy}</div>}
+                {pb.clientDisconnectPolicy && <div><b>Client disconnect:</b> {pb.clientDisconnectPolicy}</div>}
+              </> : <>
+                {D.priceVersions.map(p => (
+                  <div key={p.tag} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: '1px solid #f0f0f0', fontSize: 12, lineHeight: 1.45 }}>
+                    <Badge c={p.c} style={{ height: 'fit-content' }}>{p.tag}</Badge>
+                    <div>{p.text}</div>
+                  </div>
+                ))}
+              </>}
             </div>
           </div>
         </div>
@@ -453,13 +513,42 @@ export function BudgetsPanel({ D, addButtons, apiBudgets }) {
   );
 }
 
-export function Plans({ D, plan, setPlan }) {
-  const sel = D.plans.find(p => p.name === plan) || D.plans[2];
+function fmtTokens(n) {
+  if (n == null) return 'Custom';
+  if (n >= 1e9) return (n / 1e9).toFixed(n % 1e9 === 0 ? 0 : 1) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(n % 1e3 === 0 ? 0 : 1) + 'k';
+  return String(n);
+}
+
+function mapApiPlan(p) {
+  const lim = p.limits || {};
+  return {
+    name: p.name,
+    slug: p.name.toLowerCase(),
+    rpm: lim.requestsPerMinute != null ? String(lim.requestsPerMinute) : 'Custom',
+    tpm: fmtTokens(lim.tokensPerMinute),
+    tpmN: lim.tokensPerMinute || 0,
+    day: fmtTokens(lim.tokensPerDay),
+    dayN: lim.tokensPerDay || 0,
+    conc: lim.maxConcurrency != null ? String(lim.maxConcurrency) : 'Custom',
+    tenantsN: p.tenantCount || 0,
+    models: p.modelScopes && p.modelScopes.length > 0 ? p.modelScopes.join(', ') : 'All models',
+    queue: p.priceBookRef ? `PriceBook: ${p.priceBookRef}` : '',
+    compiledPolicies: p.compiledPolicies || [],
+  };
+}
+
+export function Plans({ D, plan, setPlan, apiPlans }) {
+  const plans = apiPlans ? apiPlans.map(mapApiPlan) : D.plans;
+  const sel = plans.find(p => p.name === plan) || plans[0];
+  if (!sel) return <div data-screen-label="Plans & rate limits"><PageH title="Plans & rate limits" sub="No plans configured." /></div>;
+  const allUpToDate = sel.compiledPolicies && sel.compiledPolicies.length > 0 && sel.compiledPolicies.every(cp => cp.upToDate);
   return (
     <div data-screen-label="Plans & rate limits">
       <PageH title="Plans & rate limits" sub="Plans compile to Kuadrant policy CRs on the MaaS gateway. Select a plan to inspect the generated policy." />
       <div style={{ display: 'flex', gap: 14, marginBottom: 16 }}>
-        {D.plans.map(p => (
+        {plans.map(p => (
           <Card key={p.name} style={{ flex: 1, cursor: 'pointer', border: `2px solid ${plan === p.name ? '#0066CC' : 'transparent'}` }}>
             <div onClick={() => setPlan(p.name)}>
               <div style={{ display: 'flex', alignItems: 'baseline' }}>
@@ -471,7 +560,7 @@ export function Plans({ D, plan, setPlan }) {
                   <div key={l} style={{ display: 'flex', justifyContent: 'space-between' }}><span>{l}</span><b style={{ fontFamily: MONO, fontWeight: 600 }}>{v}</b></div>
                 ))}
               </div>
-              <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 12, paddingTop: 10, fontSize: 12, color: '#6a6e73', lineHeight: 1.45 }}>{p.models}<br />{p.queue}</div>
+              <div style={{ borderTop: '1px solid #f0f0f0', marginTop: 12, paddingTop: 10, fontSize: 12, color: '#6a6e73', lineHeight: 1.45 }}>{p.models}{p.queue ? <><br />{p.queue}</> : null}</div>
             </div>
           </Card>
         ))}
@@ -480,6 +569,9 @@ export function Plans({ D, plan, setPlan }) {
         <div style={{ background: '#151515', borderRadius: 8, padding: '18px 20px', overflow: 'auto' }}>
           <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10 }}>
             <div style={{ color: '#fff', fontFamily: DISPLAY, fontSize: 14, fontWeight: 600 }}>Compiled policy — {sel.name}</div>
+            {sel.compiledPolicies && sel.compiledPolicies.length > 0 && (
+              <Badge c={allUpToDate ? 'green' : 'gold'} style={{ marginLeft: 10 }}>{allUpToDate ? 'Up to date' : 'Drifted'}</Badge>
+            )}
             <span style={{ marginLeft: 'auto', fontSize: 11, color: '#8a8d90', fontFamily: MONO }}>maas-default-gateway</span>
           </div>
           <pre style={{ margin: 0, fontFamily: MONO, fontSize: 11.5, lineHeight: 1.55, color: '#d2d2d2', whiteSpace: 'pre' }}>{planYaml(sel)}</pre>
@@ -505,7 +597,74 @@ export function Plans({ D, plan, setPlan }) {
 
 const selStyle = { fontFamily: "'Red Hat Text',sans-serif", fontSize: 13, padding: '7px 10px', border: '1px solid #c7c7c7', borderRadius: 6, background: '#fff' };
 
-export function UsageExplorer({ D }) {
+function fmtNum(n) {
+  if (n == null || isNaN(n)) return '0';
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(Math.round(n));
+}
+
+function buildUsageDays(points) {
+  const byDay = {};
+  for (const p of points) {
+    const day = p.start.slice(0, 10);
+    if (!byDay[day]) byDay[day] = { input: 0, output: 0, reasoning: 0, cached: 0 };
+    const q = p.quantities || {};
+    byDay[day].input += q.prompt_tokens || 0;
+    byDay[day].output += q.completion_tokens || 0;
+    byDay[day].reasoning += q.reasoning_tokens || 0;
+    byDay[day].cached += q.cached_tokens || 0;
+  }
+  const days = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b));
+  const maxTotal = Math.max(1, ...days.map(([, d]) => d.input + d.output + d.reasoning + d.cached));
+  const maxH = 118;
+  return days.map(([day, d]) => {
+    const total = d.input + d.output + d.reasoning + d.cached;
+    const scale = total > 0 ? maxH / maxTotal : 0;
+    const dt = new Date(day + 'T00:00:00Z');
+    return {
+      h1: Math.max(1, Math.round(d.input * scale)) + 'px',
+      h2: Math.max(1, Math.round(d.output * scale)) + 'px',
+      h3: Math.round(d.reasoning * scale) + 'px',
+      h4: Math.round(d.cached * scale) + 'px',
+      label: dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }),
+      tip: `${dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: ${fmtNum(total)} tokens`,
+    };
+  });
+}
+
+function buildUsageRows(points) {
+  const bySku = {};
+  for (const p of points) {
+    const key = p.sku + '|' + (p.geo || '');
+    if (!bySku[key]) bySku[key] = { model: p.sku, geo: p.geo || '---', req: 0, tin: 0, tout: 0, trsn: 0, tcache: 0, cost: 0 };
+    const q = p.quantities || {};
+    bySku[key].req += p.events || 0;
+    bySku[key].tin += q.prompt_tokens || 0;
+    bySku[key].tout += q.completion_tokens || 0;
+    bySku[key].trsn += q.reasoning_tokens || 0;
+    bySku[key].tcache += q.cached_tokens || 0;
+    bySku[key].cost += parseFloat(p.charged || '0');
+  }
+  const rawRows = Object.values(bySku);
+  const rows = rawRows.map(r => ({
+    model: r.model, geo: r.geo,
+    req: fmtNum(r.req), tin: fmtNum(r.tin), tout: fmtNum(r.tout), trsn: fmtNum(r.trsn), tcache: fmtNum(r.tcache),
+    cost: fmtMoney(r.cost.toFixed(2)), total: false,
+  }));
+  if (rows.length > 0) {
+    const totReq = rawRows.reduce((s, r) => s + r.req, 0);
+    const totCost = rawRows.reduce((s, r) => s + r.cost, 0);
+    rows.push({ model: 'Total', geo: '', req: fmtNum(totReq), tin: '---', tout: '---', trsn: '---', tcache: '---', cost: fmtMoney(totCost.toFixed(2)), total: true });
+  }
+  return rows;
+}
+
+export function UsageExplorer({ D, apiUsage }) {
+  const hasApi = apiUsage && apiUsage.points && apiUsage.points.length > 0;
+  const days = hasApi ? buildUsageDays(apiUsage.points) : D.days;
+  const usageRows = hasApi ? buildUsageRows(apiUsage.points) : D.usageRows;
   const cols = '1.8fr 1fr .9fr 1fr 1fr 1fr 1fr 1fr';
   return (
     <div data-screen-label="Usage explorer">
@@ -518,10 +677,10 @@ export function UsageExplorer({ D }) {
         <select style={selStyle}><option>Group by: model</option><option>Group by: tenant</option><option>Group by: API key</option><option>Group by: geo</option></select>
         <div style={{ marginLeft: 'auto' }}><Btn small>Export</Btn></div>
       </Card>
-      <div style={{ marginBottom: 14 }}><Stacked days={D.days} legend={D.usageLegend} title="Tokens by type, daily" /></div>
+      <div style={{ marginBottom: 14 }}><Stacked days={days} legend={D.usageLegend} title="Tokens by type, daily" /></div>
       <Card style={{ padding: 0, overflow: 'hidden' }}>
         <THead cols={cols} labels={['Model', 'Geo', 'Requests', 'Input', 'Output', 'Reasoning', 'Cached', 'Billed']} />
-        {D.usageRows.map((u, i) => (
+        {usageRows.map((u, i) => (
           <TRow key={i} cols={cols} style={{ fontWeight: u.total ? 700 : 400, background: u.total ? '#fafafa' : '#fff' }}>
             <div>{u.model}</div><Dim>{u.geo}</Dim>
             <Mono>{u.req}</Mono><Mono>{u.tin}</Mono><Mono>{u.tout}</Mono><Mono>{u.trsn}</Mono><Mono>{u.tcache}</Mono><Mono>{u.cost}</Mono>

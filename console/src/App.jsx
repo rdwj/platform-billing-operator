@@ -4,7 +4,7 @@ import { DISPLAY, PAL } from './ui.jsx';
 import { Overview, Models, Tenants, TenantDetail, Plans, UsageExplorer, Billing, Cost, Metering, ApiSurface } from './screens-provider.jsx';
 import { TOverview, TModels, TUsage, TBilling, TBudgets, TKeys } from './screens-tenant.jsx';
 import Integrations from './screens-integrations.jsx';
-import { fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport } from './api.js';
+import { fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport, fetchPlans, fetchPriceBooks, fetchUsage } from './api.js';
 
 function fmtMoney(v) {
   if (!v || v === '0' || v === '0.000000') return '$0.00';
@@ -105,10 +105,24 @@ export default function App() {
   const [apiBudgets, setApiBudgets] = useState(null);
   const [apiKeys, setApiKeys] = useState(null);
   const [apiExport, setApiExport] = useState(null);
+  const [apiPlans, setApiPlans] = useState(null);
+  const [apiPriceBooks, setApiPriceBooks] = useState(null);
+  const [apiUsage, setApiUsage] = useState(null);
 
   useEffect(() => {
     fetchTenants().then(data => {
       if (data && data.tenants) setApiTenants(data.tenants);
+    });
+    fetchPlans().then(data => {
+      if (data && data.plans) setApiPlans(data.plans);
+    });
+    fetchPriceBooks().then(data => {
+      if (data && data.pricebooks) setApiPriceBooks(data.pricebooks);
+    });
+    const now = new Date();
+    const from14 = new Date(now.getTime() - 14 * 86400000).toISOString();
+    fetchUsage({ from: from14, to: now.toISOString(), bucket: 'day' }).then(data => {
+      if (data) setApiUsage(data);
     });
   }, []);
 
@@ -193,8 +207,8 @@ export default function App() {
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <div style={{ padding: '22px 28px 40px', maxWidth: 1320 }}>
             {prov && screen === 'overview' && <Overview D={D} apiTenants={apiTenants} onTenant={openTenant} goMetering={() => setScreen('metering')} />}
-            {prov && screen === 'models' && <Models D={D} />}
-            {prov && screen === 'plans' && <Plans D={D} plan={plan} setPlan={setPlan} />}
+            {prov && screen === 'models' && <Models D={D} apiPriceBooks={apiPriceBooks} />}
+            {prov && screen === 'plans' && <Plans D={D} plan={plan} setPlan={setPlan} apiPlans={apiPlans} />}
             {prov && screen === 'tenants' && !tenant && <Tenants D={D} apiTenants={apiTenants} onTenant={openTenant} />}
             {prov && screen === 'tenants' && tenant && (
               <TenantDetail D={D} td={td} tab={tab} setTab={setTab} ledger={ledgerView}
@@ -205,7 +219,7 @@ export default function App() {
                 toggleFreeze={() => setFrozen({ ...frozen, [td.tid]: !frozen[td.tid] })}
                 freezeLabel={frozen[td.tid] ? 'Unfreeze keys' : 'Freeze keys'} />
             )}
-            {prov && screen === 'usage' && <UsageExplorer D={D} />}
+            {prov && screen === 'usage' && <UsageExplorer D={D} apiUsage={apiUsage} />}
             {prov && screen === 'integrations' && <Integrations />}
             {prov && screen === 'billing' && <Billing D={D} dunning={dunning} />}
             {prov && screen === 'cost' && <Cost D={D} />}
