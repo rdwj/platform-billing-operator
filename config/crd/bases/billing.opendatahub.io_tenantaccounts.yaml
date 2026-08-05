@@ -84,6 +84,16 @@ spec:
               displayName:
                 description: DisplayName is the human-readable tenant name.
                 type: string
+              gpuFreezeMode:
+                default: Drain
+                description: |-
+                  GPUFreezeMode controls how GPU workloads are handled when the tenant's
+                  balance is depleted. Drain (default): running workloads finish naturally
+                  but no new ones are admitted. Preempt: running workloads are evicted.
+                enum:
+                - Drain
+                - Preempt
+                type: string
               gracePolicy:
                 description: GracePolicy defines behavior when the tenant's balance
                   drops to zero.

@@ -74,6 +74,8 @@ type TenantAccountReconciler struct {
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=tenantaccounts/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=tenantaccounts/finalizers,verbs=update
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=pricebooks,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=clusterqueues,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=clusterqueues/status,verbs=get
 
 func (r *TenantAccountReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)

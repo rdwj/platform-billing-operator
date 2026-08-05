@@ -65,6 +65,14 @@ spec:
               limits:
                 description: Limits configures the rate limits for this plan.
                 properties:
+                  gpuQuota:
+                    description: |-
+                      GPUQuota is the maximum number of GPUs available for Kueue workloads
+                      under this plan. When set, the KueueBackend manages a per-tenant
+                      ClusterQueue with this nominalQuota for nvidia.com/gpu resources.
+                    format: int32
+                    minimum: 0
+                    type: integer
                   maxConcurrency:
                     description: |-
                       MaxConcurrency is the concurrent request limit.

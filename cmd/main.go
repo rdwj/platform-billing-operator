@@ -277,12 +277,17 @@ func main() {
 			os.Exit(1)
 		}
 
-		enforcementBackend := enforcement.NewMaaSBackend(mgr.GetClient(), mgr.GetScheme(), store)
+		compositeBackend := enforcement.NewCompositeBackend(mgr.GetClient())
+		compositeBackend.Register(enforcement.ProductMaaS,
+			enforcement.NewMaaSBackend(mgr.GetClient(), mgr.GetScheme(), store))
+		compositeBackend.Register(enforcement.ProductGPUaaS,
+			enforcement.NewKueueBackend(mgr.GetClient(), mgr.GetScheme()))
+
 		if err = (&controller.TenantAccountReconciler{
 			Client:      mgr.GetClient(),
 			Scheme:      mgr.GetScheme(),
 			Ledger:      store,
-			Enforcement: enforcementBackend,
+			Enforcement: compositeBackend,
 			PSPRegistry: pspRegistry,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "TenantAccount")
@@ -293,7 +298,7 @@ func main() {
 			Client:      mgr.GetClient(),
 			Scheme:      mgr.GetScheme(),
 			Ledger:      store,
-			Enforcement: enforcementBackend,
+			Enforcement: compositeBackend,
 			Recorder:    mgr.GetEventRecorderFor("budgetpolicy-controller"),
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "BudgetPolicy")

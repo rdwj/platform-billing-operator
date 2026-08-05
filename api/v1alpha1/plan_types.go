@@ -81,6 +81,13 @@ type PlanLimits struct {
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	MaxConcurrency *int32 `json:"maxConcurrency,omitempty"`
+
+	// GPUQuota is the maximum number of GPUs available for Kueue workloads
+	// under this plan. When set, the KueueBackend manages a per-tenant
+	// ClusterQueue with this nominalQuota for nvidia.com/gpu resources.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	GPUQuota *int32 `json:"gpuQuota,omitempty"`
 }
 
 // PlanStatus defines the observed state of a Plan.

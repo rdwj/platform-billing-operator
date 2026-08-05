@@ -131,18 +131,29 @@ rules:
 - apiGroups:
   - kueue.x-k8s.io
   resources:
+  - clusterqueues
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - kueue.x-k8s.io
+  resources:
+  - clusterqueues/status
+  - workloads/status
+  verbs:
+  - get
+- apiGroups:
+  - kueue.x-k8s.io
+  resources:
   - resourceflavors
   - workloads
   verbs:
   - get
   - list
   - watch
-- apiGroups:
-  - kueue.x-k8s.io
-  resources:
-  - workloads/status
-  verbs:
-  - get
 - apiGroups:
   - route.openshift.io
   resources:

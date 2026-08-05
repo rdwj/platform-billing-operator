@@ -41,6 +41,9 @@ const (
 	BillingModeShowbackOnly = "ShowbackOnly"
 	BillingModePrepaid      = "Prepaid"
 	BillingModeInvoiced     = "Invoiced"
+
+	GPUFreezeModeDrain   = "Drain"
+	GPUFreezeModePreempt = "Preempt"
 )
 
 // ReloadPolicy configures automatic wallet reload for Prepaid tenants.
@@ -129,6 +132,14 @@ type TenantAccountSpec struct {
 	// GracePolicy defines behavior when the tenant's balance drops to zero.
 	// +optional
 	GracePolicy *GracePolicy `json:"gracePolicy,omitempty"`
+
+	// GPUFreezeMode controls how GPU workloads are handled when the tenant's
+	// balance is depleted. Drain (default): running workloads finish naturally
+	// but no new ones are admitted. Preempt: running workloads are evicted.
+	// +optional
+	// +kubebuilder:validation:Enum=Drain;Preempt
+	// +kubebuilder:default="Drain"
+	GPUFreezeMode string `json:"gpuFreezeMode,omitempty"`
 }
 
 // TenantAccountStatus defines the observed state of a TenantAccount.
