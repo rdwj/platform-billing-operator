@@ -18,6 +18,7 @@ import (
 type tenantToken struct {
 	tenantID string
 	token    string
+	keyID    string
 }
 
 type config struct {
@@ -46,7 +47,7 @@ func main() {
 	flag.StringVar(&cfg.url, "url", "", "target URL (required)")
 	flag.StringVar(&cfg.token, "token", "", "bearer token (gateway mode, single tenant)")
 	var tokensFlag string
-	flag.StringVar(&tokensFlag, "tokens", "", "comma-separated tenant_id:token pairs for multi-tenant round-robin")
+	flag.StringVar(&tokensFlag, "tokens", "", "comma-separated tenant_id:token:key_id entries for multi-tenant round-robin")
 	flag.IntVar(&cfg.concurrency, "concurrency", 10, "concurrent workers")
 	flag.DurationVar(&cfg.duration, "duration", 60*time.Second, "test duration")
 	flag.StringVar(&cfg.model, "model", "/mnt/models", "model name")
@@ -78,12 +79,16 @@ func main() {
 			if pair == "" {
 				continue
 			}
-			parts := strings.SplitN(pair, ":", 2)
-			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-				fmt.Fprintf(os.Stderr, "error: --tokens entry %q must be tenant_id:token\n", pair)
+			parts := strings.SplitN(pair, ":", 3)
+			if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+				fmt.Fprintf(os.Stderr, "error: --tokens entry %q must be tenant_id:token[:key_id]\n", pair)
 				os.Exit(1)
 			}
-			tenants = append(tenants, tenantToken{tenantID: parts[0], token: parts[1]})
+			tt := tenantToken{tenantID: parts[0], token: parts[1]}
+			if len(parts) == 3 {
+				tt.keyID = parts[2]
+			}
+			tenants = append(tenants, tt)
 		}
 		if len(tenants) == 0 {
 			fmt.Fprintln(os.Stderr, "error: --tokens provided but no valid entries parsed")
@@ -166,14 +171,14 @@ func worker(ctx context.Context, client *http.Client, cfg *config, tenants []ten
 
 		switch cfg.mode {
 		case "gateway":
-			// Pick the token for this request via round-robin across tenants.
-			token := ""
+			// Pick the tenant for this request via round-robin.
+			var tenant tenantToken
 			if len(tenants) > 0 {
 				idx := counter.Add(1) - 1
-				token = tenants[idx%uint64(len(tenants))].token
+				tenant = tenants[idx%uint64(len(tenants))]
 			}
 			stream := rand.Float64() < cfg.streamRatio
-			latency, err = GatewayRequest(ctx, client, cfg, token, stream)
+			latency, err = GatewayRequest(ctx, client, cfg, tenant, stream)
 		case "ingest":
 			latency, err = IngestRequest(ctx, client, cfg.url)
 		}

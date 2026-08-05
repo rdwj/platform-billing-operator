@@ -221,18 +221,19 @@ impl HttpContext for CaptureFilter {
             self.upstream_request_id = Some(req_id);
         }
 
-        // Read identity from Authorino filter metadata (set by ext_authz earlier
-        // in the chain). The metadata path depends on how Authorino is configured;
-        // the filter name is configurable via `authz_filter_name`.
+        // Read identity. Try Authorino dynamic metadata first, then injected
+        // HTTP headers. Both are available here because this filter is
+        // positioned after Kuadrant's WASM shim in the filter chain.
         self.tenant_id = self.get_authorino_metadata("tenant_id");
         self.key_id = self.get_authorino_metadata("key_id");
 
         if self.tenant_id.is_none() {
-            warn!(
-                "capture-filter[{}]: tenant_id not found in Authorino metadata, \
-                 will use 'unknown'",
-                self.context_id
-            );
+            if let Ok(Some(t)) = self.get_http_request_header("x-billing-tenant-id") {
+                self.tenant_id = Some(t);
+            }
+            if let Ok(Some(k)) = self.get_http_request_header("x-billing-key-id") {
+                self.key_id = Some(k);
+            }
         }
 
         // Remove Content-Length so we can safely modify the body in
@@ -318,6 +319,30 @@ impl HttpContext for CaptureFilter {
             if let Ok(Some(req_id)) = self.get_http_response_header("x-request-id") {
                 self.upstream_request_id = Some(req_id);
             }
+        }
+
+        // Read identity from Authorino. Try dynamic metadata first (works
+        // when Authorino runs as a standard ext_authz filter), then fall
+        // back to injected HTTP headers (works with Kuadrant's WASM shim
+        // which injects identity via response headers).
+        if self.tenant_id.is_none() {
+            self.tenant_id = self.get_authorino_metadata("tenant_id");
+            self.key_id = self.get_authorino_metadata("key_id");
+        }
+        if self.tenant_id.is_none() {
+            if let Ok(Some(t)) = self.get_http_request_header("x-billing-tenant-id") {
+                self.tenant_id = Some(t);
+            }
+            if let Ok(Some(k)) = self.get_http_request_header("x-billing-key-id") {
+                self.key_id = Some(k);
+            }
+        }
+        if self.tenant_id.is_none() {
+            warn!(
+                "capture-filter[{}]: tenant_id not found in metadata or headers, \
+                 will use 'unknown'",
+                self.context_id
+            );
         }
 
         // Track upstream status for failure detection in on_log / end_of_stream.
