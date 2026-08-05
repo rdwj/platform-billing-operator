@@ -1,42 +1,56 @@
 import React from 'react';
 import { Card, PageH, SecTitle, MiniLabel, Kpi, Badge, Btn, THead, TRow, Mono, Dim, Progress, Stacked, DISPLAY, MONO } from './ui.jsx';
 import { LedgerTable, BudgetsPanel, KeysTable } from './screens-provider.jsx';
+import { fmtMoney, fmtTokenCount, USAGE_LEGEND } from './utils.js';
 
-export function TOverview({ D, th, ledger, goTo }) {
+function fmtRate(r) {
+  if (!r) return '---';
+  const n = parseFloat(r);
+  return isNaN(n) ? '---' : '$' + n.toFixed(2);
+}
+
+export function TOverview({ th, ledger, goTo, usageDays, budgets }) {
   const tKpis = [
     { label: 'Prepaid balance', value: th.balance, delta: th.runway },
-    { label: 'Spend · MTD', value: '$61,447', delta: '+31% vs June pace', deltaColor: '#204D00' },
-    { label: 'Tokens · MTD', value: '7.1B', delta: '4.6B in · 2.1B out · 388M reasoning' },
-    { label: 'Rate limit headroom', value: '1.24M / 2M', delta: 'TPM this minute · Priority plan' }
+    { label: 'Spend · MTD', value: th.mtd || '---', delta: th.burn ? `Burn rate: ${th.burn}` : '' },
+    { label: 'Plan', value: th.plan || '---', delta: th.mode || '' },
   ];
   return (
     <div data-screen-label="Tenant overview">
-      <PageH title="Overview" sub="Helix Biotech · Priority plan · served from us-east-1 + eu-central-1" />
+      <PageH title="Overview" sub={`${th.name} · ${th.plan} plan`} />
       <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>{tKpis.map(k => <Kpi key={k.label} {...k} />)}</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 14 }}>
-        <Stacked days={D.days} legend={D.usageLegend} title="Your tokens by type, daily" />
+        {usageDays && usageDays.length > 0
+          ? <Stacked days={usageDays} legend={USAGE_LEGEND} title="Your tokens by type, daily" />
+          : <Card style={{ padding: '18px 20px' }}><Dim>No usage data available yet.</Dim></Card>}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Card>
-            <SecTitle right={<a href="#" onClick={e => { e.preventDefault(); goTo('t-budgets'); }} style={{ fontSize: 12 }}>Manage</a>}>Budgets — July</SecTitle>
-            {D.budgets.map(b => (
-              <div key={b.name} style={{ padding: '8px 0', borderTop: '1px solid #f5f5f5' }}>
+            <SecTitle right={<a href="#" onClick={e => { e.preventDefault(); goTo('t-budgets'); }} style={{ fontSize: 12 }}>Manage</a>}>Budgets</SecTitle>
+            {budgets && budgets.length > 0 ? budgets.map(bp => (
+              <div key={bp.name} style={{ padding: '8px 0', borderTop: '1px solid #f5f5f5' }}>
                 <div style={{ display: 'flex', fontSize: 12.5 }}>
-                  <div style={{ fontWeight: 600 }}>{b.name}</div>
-                  <Mono style={{ marginLeft: 'auto', fontSize: 11.5 }}>{b.used}</Mono>
+                  <div style={{ fontWeight: 600 }}>{bp.name}</div>
+                  <Mono style={{ marginLeft: 'auto', fontSize: 11.5 }}>{fmtMoney(bp.current_spend)}</Mono>
                 </div>
-                <div style={{ marginTop: 6 }}><Progress w={b.w} color={b.color} h={6} /></div>
+                {(bp.caps || []).map(cap => {
+                  const spend = parseFloat(bp.current_spend || '0');
+                  const capAmt = parseFloat(cap.amount || '1');
+                  const pct = capAmt > 0 ? Math.min(100, Math.round((spend / capAmt) * 100)) : 0;
+                  const color = pct > 90 ? '#B1380B' : pct > 70 ? '#F0AB00' : '#3D7317';
+                  return <div key={cap.period} style={{ marginTop: 6 }}><Progress w={pct + '%'} color={color} h={6} /></div>;
+                })}
               </div>
-            ))}
+            )) : <Dim style={{ marginTop: 8 }}>No budgets configured.</Dim>}
           </Card>
           <Card style={{ flex: 1 }}>
             <SecTitle right={<a href="#" onClick={e => { e.preventDefault(); goTo('t-billing'); }} style={{ fontSize: 12 }}>Ledger</a>}>Recent activity</SecTitle>
-            {ledger.slice(0, 4).map((l, i) => (
+            {ledger.length > 0 ? ledger.slice(0, 4).map((l, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, padding: '7px 0', borderTop: '1px solid #f5f5f5', fontSize: 12, alignItems: 'center' }}>
                 <Badge c={l.c} style={{ padding: '1px 8px', fontSize: 10.5 }}>{l.type}</Badge>
                 <div style={{ flex: 1, color: '#6a6e73' }}>{l.date}</div>
                 <Mono style={{ fontSize: 11.5, color: l.amtColor }}>{l.amt}</Mono>
               </div>
-            ))}
+            )) : <Dim style={{ marginTop: 8 }}>No ledger entries yet.</Dim>}
           </Card>
         </div>
       </div>
@@ -44,30 +58,37 @@ export function TOverview({ D, th, ledger, goTo }) {
   );
 }
 
-export function TModels({ D }) {
-  const cols = '1.9fr 1.4fr 1.4fr .7fr .7fr .8fr .7fr 1.2fr';
+export function TModels({ pricing, planName }) {
+  const cols = '2fr .7fr .7fr .8fr .7fr';
   return (
     <div data-screen-label="Tenant model directory">
-      <PageH title="Model directory" sub="Your prices on the Priority plan — volume tier −8% applied to hosted models. Rates per 1M tokens." />
-      <Card style={{ padding: 0, overflow: 'hidden' }}>
-        <THead cols={cols} labels={['Model', 'Serving', 'Geos', 'Input', 'Output', 'Reasoning', 'Cached', 'Your rate']} />
-        {D.tModels.map(m => (
-          <TRow key={m.name} cols={cols}>
-            <div style={{ fontWeight: 600 }}>{m.name}</div><Dim>{m.kind}</Dim><Dim>{m.geos}</Dim>
-            <Mono>{m.pin}</Mono><Mono>{m.pout}</Mono><Mono>{m.prsn}</Mono><Mono>{m.pcache}</Mono>
-            <div style={{ fontSize: 11.5, color: '#6a6e73' }}>{m.note}</div>
-          </TRow>
-        ))}
-      </Card>
+      <PageH title="Model directory" sub={`Your effective rates on the ${planName || '---'} plan. Rates per 1M tokens.`} />
+      {pricing && pricing.length > 0 ? (
+        <Card style={{ padding: 0, overflow: 'hidden' }}>
+          <THead cols={cols} labels={['Model', 'Input', 'Output', 'Reasoning', 'Cached']} />
+          {pricing.map((m, i) => (
+            <TRow key={m.sku || m.model || i} cols={cols}>
+              <div style={{ fontWeight: 600 }}>{m.sku || m.model || '---'}</div>
+              <Mono>{fmtRate(m.rates?.prompt_tokens)}</Mono>
+              <Mono>{fmtRate(m.rates?.completion_tokens)}</Mono>
+              <Mono>{fmtRate(m.rates?.reasoning_tokens)}</Mono>
+              <Mono>{fmtRate(m.rates?.cached_tokens)}</Mono>
+            </TRow>
+          ))}
+        </Card>
+      ) : (
+        <Card style={{ padding: '18px 20px' }}>
+          <Dim>No pricing data available. Contact your provider for rate details.</Dim>
+        </Card>
+      )}
       <div style={{ background: '#151515', borderRadius: 8, padding: '14px 18px', marginTop: 14, display: 'flex', alignItems: 'center', gap: 14 }}>
-        <div style={{ fontFamily: MONO, fontSize: 12.5, color: '#d2d2d2' }}>https://api.corvid-ai.cloud/v1 &nbsp;·&nbsp; OpenAI-compatible · existing SDKs work unchanged</div>
-        <a href="#" onClick={e => e.preventDefault()} style={{ marginLeft: 'auto', fontSize: 12, color: '#73BCF7' }}>Copy base URL</a>
+        <div style={{ fontFamily: MONO, fontSize: 12.5, color: '#d2d2d2' }}>OpenAI-compatible endpoint · existing SDKs work unchanged</div>
       </div>
     </div>
   );
 }
 
-export function TUsage({ D }) {
+export function TUsage({ usageDays, keyUsage }) {
   const cols = '1.3fr 1.8fr .9fr 1fr 1fr 1fr 1fr';
   return (
     <div data-screen-label="Tenant usage & reports">
@@ -76,16 +97,24 @@ export function TUsage({ D }) {
         sub={<span>Per-request metering, deduplicated — quote <span style={{ fontFamily: MONO, fontSize: 12 }}>x-maas-request-id</span> in any dispute.</span>}
         right={<><Btn small>Export CSV</Btn><Btn small>Export FOCUS 1.2</Btn></>}
       />
-      <div style={{ marginBottom: 14 }}><Stacked days={D.days} legend={D.usageLegend} title="Tokens by type, daily" height={140} /></div>
-      <Card style={{ padding: 0, overflow: 'hidden' }}>
-        <THead cols={cols} labels={['API key', 'Model', 'Requests', 'Input', 'Output', 'Reasoning', 'Billed']} />
-        {D.tKeyUsage.map(u => (
-          <TRow key={u.key} cols={cols}>
-            <div style={{ fontWeight: 600 }}>{u.key}</div><Dim>{u.model}</Dim>
-            <Mono>{u.req}</Mono><Mono>{u.tin}</Mono><Mono>{u.tout}</Mono><Mono>{u.trsn}</Mono><Mono>{u.cost}</Mono>
-          </TRow>
-        ))}
-      </Card>
+      {usageDays && usageDays.length > 0 ? (
+        <div style={{ marginBottom: 14 }}><Stacked days={usageDays} legend={USAGE_LEGEND} title="Tokens by type, daily" height={140} /></div>
+      ) : (
+        <Card style={{ padding: '18px 20px', marginBottom: 14 }}><Dim>No usage data available yet.</Dim></Card>
+      )}
+      {keyUsage && keyUsage.length > 0 ? (
+        <Card style={{ padding: 0, overflow: 'hidden' }}>
+          <THead cols={cols} labels={['API key', 'Model', 'Requests', 'Input', 'Output', 'Reasoning', 'Billed']} />
+          {keyUsage.map((u, i) => (
+            <TRow key={u.key || i} cols={cols}>
+              <div style={{ fontWeight: 600 }}>{u.key || '---'}</div><Dim>{u.model || '---'}</Dim>
+              <Mono>{u.req || '---'}</Mono><Mono>{u.tin || '---'}</Mono><Mono>{u.tout || '---'}</Mono><Mono>{u.trsn || '---'}</Mono><Mono>{u.cost || '---'}</Mono>
+            </TRow>
+          ))}
+        </Card>
+      ) : (
+        <Card style={{ padding: '18px 20px' }}><Dim>No per-key usage data available.</Dim></Card>
+      )}
       <Dim style={{ marginTop: 10 }}>FOCUS export lets your FinOps team ingest this into Cloudability / CloudHealth alongside cloud spend. Chargeback mapping (key → project → cost center) is set per key.</Dim>
     </div>
   );
@@ -98,7 +127,7 @@ const InputBox = ({ label, mono, children }) => (
   </div>
 );
 
-export function TBilling({ D, th, ledger, arOn, toggleAr }) {
+export function TBilling({ th, ledger, arOn, toggleAr, invoices }) {
   return (
     <div data-screen-label="Tenant balance & billing">
       <PageH title="Balance & billing" sub="Prepaid balance with auto-reload. Receipts and the full ledger below." />
@@ -130,12 +159,15 @@ export function TBilling({ D, th, ledger, arOn, toggleAr }) {
         </Card>
         <Card style={{ padding: '18px 20px' }}>
           <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Receipts</div>
-          {D.receipts.map(r => (
-            <div key={r.label} style={{ display: 'flex', gap: 8, padding: '8px 0', borderTop: '1px solid #f5f5f5', fontSize: 12.5, alignItems: 'center' }}>
-              <div style={{ flex: 1 }}>{r.label}</div><Mono>{r.amt}</Mono>
+          {invoices && invoices.length > 0 ? invoices.map((r, i) => (
+            <div key={r.period || i} style={{ display: 'flex', gap: 8, padding: '8px 0', borderTop: '1px solid #f5f5f5', fontSize: 12.5, alignItems: 'center' }}>
+              <div style={{ flex: 1 }}>{r.period || r.label || '---'}</div>
+              <Mono>{fmtMoney(r.amount || r.totalAmount)}</Mono>
               <a href="#" onClick={e => e.preventDefault()} style={{ fontSize: 12 }}>PDF</a>
             </div>
-          ))}
+          )) : (
+            <Dim>No invoices yet.</Dim>
+          )}
           <div style={{ fontSize: 12, color: '#6a6e73', marginTop: 12, borderTop: '1px solid #f0f0f0', paddingTop: 10 }}>
             Need invoicing instead of prepaid? <a href="#" onClick={e => e.preventDefault()}>Talk to sales about Enterprise (Net-30, PO).</a>
           </div>
@@ -146,16 +178,16 @@ export function TBilling({ D, th, ledger, arOn, toggleAr }) {
   );
 }
 
-export function TBudgets({ D }) {
+export function TBudgets({ apiBudgets }) {
   return (
     <div data-screen-label="Tenant budgets & alerts">
       <PageH title="Budgets & alerts" sub="Soft caps notify; hard caps throttle keys at 100%. Budgets reset monthly." />
-      <BudgetsPanel D={D} addButtons />
+      <BudgetsPanel apiBudgets={apiBudgets} addButtons />
     </div>
   );
 }
 
-export function TKeys({ D, keys, createKey, secret, dismiss }) {
+export function TKeys({ keys, createKey, secret, dismiss }) {
   return (
     <div data-screen-label="Tenant API keys">
       <PageH title="API keys" sub="Scopes limit which models and geos a key can call. Per-key limits sit under your plan limits." />
@@ -170,7 +202,7 @@ export function TKeys({ D, keys, createKey, secret, dismiss }) {
           <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Keys</div>
           <div style={{ marginLeft: 'auto' }}><Btn primary small onClick={createKey}>Create key</Btn></div>
         </div>
-        <KeysTable keys={keys} />
+        {keys && keys.length > 0 ? <KeysTable keys={keys} /> : <div style={{ padding: '12px 18px', fontSize: 12, color: '#6a6e73' }}>No API keys yet. Create one to get started.</div>}
       </Card>
     </div>
   );

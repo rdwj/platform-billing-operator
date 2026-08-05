@@ -99,6 +99,14 @@ export function fetchWalkthroughStatus(id) {
   return fetchJSON(`/api/walkthroughs/${encodeURIComponent(id)}/status`);
 }
 
+export function fetchHealth() {
+  return fetchJSON('/api/health');
+}
+
+export function fetchDriftAll(limit = 20) {
+  return fetchJSON(`/api/drift?limit=${limit}`);
+}
+
 export async function executeStep(walkthroughId, stepId, formValues) {
   try {
     const res = await fetch(`/api/walkthroughs/${encodeURIComponent(walkthroughId)}/steps/${encodeURIComponent(stepId)}/execute`, {

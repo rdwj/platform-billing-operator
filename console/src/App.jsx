@@ -1,25 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { makeData, mkDetail } from './data.js';
+import { fmtMoney, badgeColor, fmtTokenCount } from './utils.js';
 import { DISPLAY, PAL } from './ui.jsx';
 import { Overview, Models, Tenants, TenantDetail, Plans, UsageExplorer, Billing, Cost, Metering, ApiSurface } from './screens-provider.jsx';
 import { TOverview, TModels, TUsage, TBilling, TBudgets, TKeys } from './screens-tenant.jsx';
 import Integrations from './screens-integrations.jsx';
-import { fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport, fetchPlans, fetchPriceBooks, fetchUsage, fetchOverview, fetchConnectors, fetchWebhooks, fetchInvoiceRuns, fetchAdjustmentsAll } from './api.js';
-
-function fmtMoney(v) {
-  if (!v || v === '0' || v === '0.000000') return '$0.00';
-  const n = parseFloat(v);
-  if (isNaN(n)) return '---';
-  const abs = Math.abs(n);
-  const s = abs >= 1000 ? '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : abs >= 1 ? '$' + abs.toFixed(2) : '$' + abs.toFixed(4);
-  return n < 0 ? '−' + s : s;
-}
-
-function badgeColor(status) {
-  const map = { Active: 'green', Warning: 'gold', Grace: 'gold', Dunning: 'red', Frozen: 'red', Suspended: 'red', Pending: 'grey', Closed: 'grey' };
-  return map[status] || 'grey';
-}
+import { fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport, fetchPlans, fetchPriceBooks, fetchUsage, fetchOverview, fetchConnectors, fetchWebhooks, fetchInvoiceRuns, fetchAdjustmentsAll, fetchHealth, fetchDriftAll, fetchPricing, fetchInvoices } from './api.js';
 
 function buildTenantDetail(t, credited, frozen) {
   const bal = t.balance ? parseFloat(t.balance) : null;
@@ -66,6 +51,35 @@ function mapLedgerEntry(e) {
   };
 }
 
+function buildUsageDays(points) {
+  const byDay = {};
+  for (const p of points) {
+    const day = p.start.slice(0, 10);
+    if (!byDay[day]) byDay[day] = { input: 0, output: 0, reasoning: 0, cached: 0 };
+    const q = p.quantities || {};
+    byDay[day].input += q.prompt_tokens || 0;
+    byDay[day].output += q.completion_tokens || 0;
+    byDay[day].reasoning += q.reasoning_tokens || 0;
+    byDay[day].cached += q.cached_tokens || 0;
+  }
+  const days = Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b));
+  const maxTotal = Math.max(1, ...days.map(([, d]) => d.input + d.output + d.reasoning + d.cached));
+  const maxH = 118;
+  return days.map(([day, d]) => {
+    const total = d.input + d.output + d.reasoning + d.cached;
+    const scale = total > 0 ? maxH / maxTotal : 0;
+    const dt = new Date(day + 'T00:00:00Z');
+    return {
+      h1: Math.max(1, Math.round(d.input * scale)) + 'px',
+      h2: Math.max(1, Math.round(d.output * scale)) + 'px',
+      h3: Math.round(d.reasoning * scale) + 'px',
+      h4: Math.round(d.cached * scale) + 'px',
+      label: dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }),
+      tip: `${dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })}: ${fmtTokenCount(total)} tokens`,
+    };
+  });
+}
+
 const PROVIDER_NAV = [
   { hdr: 'Monetize' },
   { id: 'overview', label: 'Overview' }, { id: 'models', label: 'Models & pricing' }, { id: 'plans', label: 'Plans & rate limits' },
@@ -78,7 +92,7 @@ const PROVIDER_NAV = [
 ];
 
 const TENANT_NAV = [
-  { hdr: 'Helix Biotech' },
+  { hdr: 'Tenant portal' },
   { id: 't-overview', label: 'Overview' }, { id: 't-models', label: 'Model directory' }, { id: 't-usage', label: 'Usage & reports' },
   { hdr: 'Billing' },
   { id: 't-billing', label: 'Balance & billing' }, { id: 't-budgets', label: 'Budgets & alerts' }, { id: 't-keys', label: 'API keys' }
@@ -91,11 +105,9 @@ export default function App() {
   const [tenant, setTenant] = useState(null);
   const [tab, setTab] = useState('balance');
   const [plan, setPlan] = useState('Priority');
-  const [inc, setInc] = useState(false);
   const [arOn, setArOn] = useState(true);
   const [extraKeys, setExtraKeys] = useState([]);
   const [secret, setSecret] = useState(null);
-  const [dunningRetried, setDunningRetried] = useState(false);
   const [credited, setCredited] = useState({});
   const [frozen, setFrozen] = useState({});
 
@@ -113,6 +125,11 @@ export default function App() {
   const [apiWebhooks, setApiWebhooks] = useState(null);
   const [apiInvoiceRuns, setApiInvoiceRuns] = useState(null);
   const [apiCredits, setApiCredits] = useState(null);
+  const [apiHealth, setApiHealth] = useState(null);
+  const [apiDrift, setApiDrift] = useState(null);
+  const [apiPortalPricing, setApiPortalPricing] = useState(null);
+  const [apiPortalInvoices, setApiPortalInvoices] = useState(null);
+  const [apiPortalUsage, setApiPortalUsage] = useState(null);
 
   useEffect(() => {
     fetchTenants().then(data => {
@@ -134,8 +151,11 @@ export default function App() {
     fetchWebhooks(20).then(data => { if (data && data.webhooks) setApiWebhooks(data.webhooks); });
     fetchInvoiceRuns().then(data => { if (data && data.invoiceRuns) setApiInvoiceRuns(data.invoiceRuns); });
     fetchAdjustmentsAll('manual_credit', 20).then(data => { if (data && data.adjustments) setApiCredits(data.adjustments); });
+    fetchHealth().then(data => { if (data) setApiHealth(data); });
+    fetchDriftAll().then(data => { if (data) setApiDrift(data); });
   }, []);
 
+  // Load tenant-specific data when a tenant is selected (provider drill-in)
   useEffect(() => {
     if (!tenant) {
       setApiLedger(null);
@@ -153,30 +173,62 @@ export default function App() {
     fetchExport({ tenant: tid, from, to: now.toISOString() }).then(data => { if (data) setApiExport(data); });
   }, [tenant?.tenant_id, tenant?.tid]);
 
-  const D = useMemo(() => makeData(inc), [inc]);
+  // Auto-select portal tenant and fetch tenant-specific data for tenant persona
+  useEffect(() => {
+    if (persona !== 'tenant' || !apiTenants || apiTenants.length === 0) return;
+    const first = apiTenants[0];
+    setTenant(first);
+    const tid = first.tenant_id;
+    fetchPricing(tid).then(data => { if (data) setApiPortalPricing(data); });
+    fetchInvoices(tid).then(data => { if (data) setApiPortalInvoices(data); });
+    const now = new Date();
+    const from14 = new Date(now.getTime() - 14 * 86400000).toISOString();
+    fetchUsage({ tenant: tid, from: from14, to: now.toISOString(), bucket: 'day' }).then(data => { if (data) setApiPortalUsage(data); });
+  }, [persona, apiTenants]);
 
   const prov = persona === 'provider';
   const nav = prov ? PROVIDER_NAV : TENANT_NAV;
   const active = prov ? screen : tScreen;
 
+  // Provider tenant detail
   const selectedTenantApi = tenant && apiTenants ? apiTenants.find(t => t.tenant_id === (tenant.tenant_id || tenant.tid)) : null;
-  const mockTenant = tenant ? (D.tenants.find(x => x.tid === (tenant.tid || tenant.tenant_id)) || D.tenants[1]) : D.tenants[1];
-  const td = selectedTenantApi ? buildTenantDetail(selectedTenantApi, credited, frozen) : mkDetail(mockTenant, credited, frozen);
-  const th = mkDetail(D.tenants[1], credited, frozen);
-  const ledgerView = apiLedger && apiLedger.entries ? apiLedger.entries.map(mapLedgerEntry) : D.ledger;
+  const td = selectedTenantApi ? buildTenantDetail(selectedTenantApi, credited, frozen) : null;
 
-  const dunning = D.dunningBase.map((d, i) => ({
-    ...d,
-    ...(i === 0 && dunningRetried ? { detail: 'Retry in flight — attempt 3 of 4 · initiated just now from console', a1: 'Retrying…' } : {}),
-    retry: i === 0 ? () => setDunningRetried(true) : undefined
-  }));
+  // Tenant portal detail
+  const portalTenant = apiTenants && apiTenants.length > 0 ? apiTenants[0] : null;
+  const th = portalTenant ? buildTenantDetail(portalTenant, credited, frozen) : null;
+
+  // Shared ledger view
+  const ledgerView = apiLedger && apiLedger.entries ? apiLedger.entries.map(mapLedgerEntry) : [];
+
+  // Usage days: tenant-specific for portal, global for provider UsageExplorer
+  const portalUsageSource = apiPortalUsage || apiUsage;
+  const usageDays = portalUsageSource && portalUsageSource.points ? buildUsageDays(portalUsageSource.points) : [];
+
+  // Budget summary for tenant portal
+  const portalBudgets = apiBudgets && apiBudgets.budgets ? apiBudgets.budgets : [];
+
+  // Portal invoices
+  const portalInvoices = apiPortalInvoices && apiPortalInvoices.invoices ? apiPortalInvoices.invoices : [];
+
+  // Portal pricing
+  const portalPricing = apiPortalPricing && apiPortalPricing.skus ? apiPortalPricing.skus : [];
+
+  // Portal keys for tenant view
+  const portalKeys = apiKeys && apiKeys.keys
+    ? apiKeys.keys.map(k => ({
+        name: k.key_name, prefix: k.key_name, scopes: k.source || '---',
+        limit: '---', last: k.created_at ? new Date(k.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '---',
+        status: k.enabled ? 'Active' : 'Disabled', st: k.enabled ? 'green' : 'grey',
+      }))
+    : [];
 
   const openTenant = t => { setTenant(t); setScreen('tenants'); setTab('balance'); };
   const goNav = id => { if (prov) { setScreen(id); setTenant(null); } else setTScreen(id); };
   const createKey = () => {
     const n = extraKeys.length + 1;
     const s = 'maas_sk_live_' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 10);
-    setExtraKeys([...extraKeys, { name: 'new-key-' + n, prefix: s.slice(0, 12) + '…' + s.slice(-4), scopes: 'all Priority models · any geo', limit: '100k TPM', last: 'never', status: 'Active', st: 'green' }]);
+    setExtraKeys([...extraKeys, { name: 'new-key-' + n, prefix: s.slice(0, 12) + '…' + s.slice(-4), scopes: 'all models · any geo', limit: '100k TPM', last: 'never', status: 'Active', st: 'green' }]);
     setSecret(s);
   };
 
@@ -190,15 +242,12 @@ export default function App() {
           Corvid AI Cloud&nbsp;&nbsp;<span style={{ color: '#8a8d90', fontWeight: 400 }}>MaaS FinOps Console</span>
         </div>
         <div style={{ flex: 1 }} />
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#8a8d90', cursor: 'pointer' }}>
-          <input type="checkbox" checked={inc} onChange={e => setInc(e.target.checked)} /> incident demo
-        </label>
         <div style={{ display: 'flex', background: '#2b2e33', borderRadius: 16, padding: 3, gap: 2 }}>
           <div onClick={() => setPersona('provider')} style={pill(prov)}>Provider</div>
           <div onClick={() => setPersona('tenant')} style={pill(!prov)}>Tenant portal</div>
         </div>
         <div style={{ fontSize: 12, color: '#d2d2d2', border: '1px solid #4d4d4d', borderRadius: 12, padding: '3px 12px' }}>
-          {!prov ? 'Helix Biotech · tenant workspace' : inc ? 'production · degraded' : 'production'}
+          {!prov && th ? `${th.name} · tenant workspace` : 'production'}
         </div>
         <div style={{ width: 30, height: 30, borderRadius: '50%', background: '#0066CC', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>MG</div>
       </div>
@@ -216,12 +265,12 @@ export default function App() {
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <div style={{ padding: '22px 28px 40px', maxWidth: 1320 }}>
-            {prov && screen === 'overview' && <Overview D={D} apiTenants={apiTenants} apiOverview={apiOverview} onTenant={openTenant} goMetering={() => setScreen('metering')} />}
-            {prov && screen === 'models' && <Models D={D} apiPriceBooks={apiPriceBooks} />}
-            {prov && screen === 'plans' && <Plans D={D} plan={plan} setPlan={setPlan} apiPlans={apiPlans} />}
-            {prov && screen === 'tenants' && !tenant && <Tenants D={D} apiTenants={apiTenants} onTenant={openTenant} />}
-            {prov && screen === 'tenants' && tenant && (
-              <TenantDetail D={D} td={td} tab={tab} setTab={setTab} ledger={ledgerView}
+            {prov && screen === 'overview' && <Overview apiTenants={apiTenants} apiOverview={apiOverview} onTenant={openTenant} goMetering={() => setScreen('metering')} />}
+            {prov && screen === 'models' && <Models apiPriceBooks={apiPriceBooks} />}
+            {prov && screen === 'plans' && <Plans plan={plan} setPlan={setPlan} apiPlans={apiPlans} />}
+            {prov && screen === 'tenants' && !tenant && <Tenants apiTenants={apiTenants} onTenant={openTenant} />}
+            {prov && screen === 'tenants' && tenant && td && (
+              <TenantDetail td={td} tab={tab} setTab={setTab} ledger={ledgerView}
                 apiBudgets={apiBudgets} apiKeys={apiKeys} apiExport={apiExport}
                 back={() => setTenant(null)} goPlans={() => { setScreen('plans'); setTenant(null); }}
                 grantCredit={() => !credited[td.tid] && setCredited({ ...credited, [td.tid]: true })}
@@ -229,18 +278,19 @@ export default function App() {
                 toggleFreeze={() => setFrozen({ ...frozen, [td.tid]: !frozen[td.tid] })}
                 freezeLabel={frozen[td.tid] ? 'Unfreeze keys' : 'Freeze keys'} />
             )}
-            {prov && screen === 'usage' && <UsageExplorer D={D} apiUsage={apiUsage} />}
+            {prov && screen === 'usage' && <UsageExplorer apiUsage={apiUsage} />}
             {prov && screen === 'integrations' && <Integrations />}
-            {prov && screen === 'billing' && <Billing D={D} dunning={dunning} apiConnectors={apiConnectors} apiInvoiceRuns={apiInvoiceRuns} apiWebhooks={apiWebhooks} apiCredits={apiCredits} apiTenants={apiTenants} />}
-            {prov && screen === 'cost' && <Cost D={D} />}
-            {prov && screen === 'metering' && <Metering D={D} />}
-            {prov && screen === 'api' && <ApiSurface D={D} />}
-            {!prov && tScreen === 't-overview' && <TOverview D={D} th={th} ledger={ledgerView} goTo={setTScreen} />}
-            {!prov && tScreen === 't-models' && <TModels D={D} />}
-            {!prov && tScreen === 't-usage' && <TUsage D={D} />}
-            {!prov && tScreen === 't-billing' && <TBilling D={D} th={th} ledger={ledgerView} arOn={arOn} toggleAr={() => setArOn(!arOn)} />}
-            {!prov && tScreen === 't-budgets' && <TBudgets D={D} />}
-            {!prov && tScreen === 't-keys' && <TKeys D={D} keys={D.keys.concat(extraKeys)} createKey={createKey} secret={secret} dismiss={() => setSecret(null)} />}
+            {prov && screen === 'billing' && <Billing apiConnectors={apiConnectors} apiInvoiceRuns={apiInvoiceRuns} apiWebhooks={apiWebhooks} apiCredits={apiCredits} apiTenants={apiTenants} />}
+            {prov && screen === 'cost' && <Cost apiOverview={apiOverview} />}
+            {prov && screen === 'metering' && <Metering apiHealth={apiHealth} apiDrift={apiDrift} />}
+            {prov && screen === 'api' && <ApiSurface />}
+            {!prov && th && tScreen === 't-overview' && <TOverview th={th} ledger={ledgerView} goTo={setTScreen} usageDays={usageDays} budgets={portalBudgets} />}
+            {!prov && th && tScreen === 't-models' && <TModels pricing={portalPricing} planName={th.plan} />}
+            {!prov && th && tScreen === 't-usage' && <TUsage usageDays={usageDays} keyUsage={[]} />}
+            {!prov && th && tScreen === 't-billing' && <TBilling th={th} ledger={ledgerView} arOn={arOn} toggleAr={() => setArOn(!arOn)} invoices={portalInvoices} />}
+            {!prov && th && tScreen === 't-budgets' && <TBudgets apiBudgets={apiBudgets} />}
+            {!prov && th && tScreen === 't-keys' && <TKeys keys={portalKeys.concat(extraKeys)} createKey={createKey} secret={secret} dismiss={() => setSecret(null)} />}
+            {!prov && !th && <div style={{ padding: '40px 0', textAlign: 'center', color: '#6a6e73' }}>Loading tenant portal...</div>}
           </div>
         </div>
       </div>

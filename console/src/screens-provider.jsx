@@ -1,27 +1,50 @@
 import React from 'react';
 import { Card, PageH, SecTitle, MiniLabel, Kpi, Badge, Btn, THead, TRow, Mono, Dim, Progress, Bars, Stacked, Pre, DISPLAY, MONO, PAL } from './ui.jsx';
-import { planYaml, jsonUsage, jsonEvent, jsonWebhook } from './data.js';
+import { planYaml, jsonUsage, jsonEvent, jsonWebhook } from './samples.js';
+import { fmtMoney, fmtTokenCount, USAGE_LEGEND } from './utils.js';
 
-function fmtMoney(v) {
-  if (!v || v === '0' || v === '0.000000') return '$0.00';
-  const n = parseFloat(v);
-  if (isNaN(n)) return '---';
-  const abs = Math.abs(n);
-  const s = abs >= 1000 ? '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-    : abs >= 1 ? '$' + abs.toFixed(2) : '$' + abs.toFixed(4);
-  return n < 0 ? '−' + s : s;
-}
+/* ── Static reference data (inlined from former data.js) ── */
 
-function fmtTokenCount(n) {
-  if (n == null || isNaN(n)) return '0';
-  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
-  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
-  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
-  return String(n);
-}
+const ENF_LAYERS = [
+  { layer: 'AuthPolicy', desc: 'Authorino validates the API key, resolves tenant, tier, model + geo scopes into auth.identity claims.' },
+  { layer: 'RateLimitPolicy', desc: 'Request-rate and concurrency guardrails per tenant — protects the fleet from bursts.' },
+  { layer: 'TokenRateLimitPolicy', desc: 'Token budgets per window; gateway reports actual usage as hits_addend after the response.' },
+  { layer: 'Balance allowance', desc: 'Custom controller converts prepaid balance into short-window token grants; depletion freezes keys.' }
+];
+
+const API_HEADERS = [
+  { name: 'x-maas-request-id', desc: 'Join key into the usage ledger — quote it in billing disputes.' },
+  { name: 'x-ratelimit-remaining-tokens', desc: 'Tokens left in the current window (plan-level).' },
+  { name: 'x-ratelimit-remaining-requests', desc: 'Requests left in the current window.' },
+  { name: 'x-maas-balance-remaining', desc: 'Prepaid balance after this call · eventual (≤60s).' },
+  { name: 'x-maas-price-version', desc: 'Price book applied to this request (e.g. v2).' }
+];
+
+const API_MGMT = [
+  ['GET', '/v1/usage?group_by=model,key&bucket=1h', 'Query the ledger — powers Usage explorer + tenant dashboards.'],
+  ['GET', '/v1/balance', 'Prepaid balance, runway, reload config.'],
+  ['POST', '/v1/credits', 'Grant credit (promo, SLA, goodwill) — audited.'],
+  ['PUT', '/v1/reload-policy', 'Threshold, amount, cap, payment method.'],
+  ['GET', '/v1/pricing?model=…&geo=…', 'Effective price book for a tenant (volume tier applied).'],
+  ['POST', '/v1/keys', 'Create key with model/geo scopes + per-key limits.'],
+  ['PUT', '/v1/limits/{keyId}', 'Compiles to Kuadrant policy on the gateway.'],
+  ['GET', '/v1/invoices/{period}', 'Line items traceable to ledger request_ids.'],
+  ['GET', '/v1/reports/chargeback?format=focus', 'FOCUS 1.2 / CSV export per cost center.']
+].map(([verb, path, desc]) => ({ verb, path, desc, c: verb === 'GET' ? 'blue' : verb === 'POST' ? 'green' : 'gold' }));
+
+const WEBHOOK_TYPES = ['balance.low', 'balance.depleted', 'limit.exceeded', 'budget.threshold', 'invoice.finalized', 'payment.failed', 'price.changed', 'key.rotated', 'usage.anomaly'];
+
+const CONTROL_PLANE = [
+  { cr: 'AuthPolicy', desc: 'API key → identity claims (tenant, tier, scopes) via Authorino.' },
+  { cr: 'TokenRateLimitPolicy', desc: 'Token windows per tier/tenant — Limitador counters, Redis-backed cross-cluster.' },
+  { cr: 'RateLimitPolicy', desc: 'Request-rate + concurrency guardrails.' },
+  { cr: 'LLMInferenceService', desc: 'Model serving (KServe / llm-d) per geo — the SKU’s supply side.' },
+  { cr: 'BalanceAllowance (custom)', desc: 'Prepaid balance → rolling short-window token grants; the piece RHOAI does not ship today.' }
+];
+
+/* ── Overview helpers ── */
 
 function buildOverviewKpis(ov, apiTenants) {
-  const mtd = parseFloat(ov.revenueKpis.mtdRevenue);
   const delta = ov.revenueKpis.deltaPct;
   const tokenTotal = ov.tokenMix.reduce((s, t) => s + t.total, 0);
   const tenantCount = apiTenants ? apiTenants.length : 0;
@@ -73,27 +96,35 @@ function buildOverviewAlerts(ov) {
   return alerts;
 }
 
-export function Overview({ D, apiTenants, apiOverview, onTenant, goMetering }) {
-  const ov = apiOverview;
-  const kpis = ov ? buildOverviewKpis(ov, apiTenants) : D.kpis;
-  const weeks = ov ? buildOverviewWeeks(ov.trailingWeeks) : D.weeks;
-  const tokenMix = ov ? buildTokenMix(ov.tokenMix) : D.tokenMix;
-  const topModels = ov && ov.topModels
-    ? ov.topModels.map(m => ({ name: m.sku, rev: fmtMoney(m.amount), tok: '' }))
-    : D.topModels;
-  const alerts = ov ? buildOverviewAlerts(ov) : D.alerts;
-  const pipeColor = ov ? (ov.meteringStatus.driftExceeded > 0 || ov.meteringStatus.dlqDepth > 5 ? '#B1380B' : '#3D7317') : D.pipeColor;
-  const pipeSummary = ov
-    ? (ov.meteringStatus.driftExceeded > 0
-      ? `Drift exceeded on ${ov.meteringStatus.driftExceeded} report(s) · DLQ depth: ${ov.meteringStatus.dlqDepth}`
-      : `Healthy — DLQ depth: ${ov.meteringStatus.dlqDepth}`)
-    : D.pipeSummary;
+/* ── Overview ── */
 
-  const topTenants = ov && ov.topTenants
+export function Overview({ apiTenants, apiOverview, onTenant, goMetering }) {
+  const ov = apiOverview;
+  if (!ov) {
+    return (
+      <div data-screen-label="Revenue overview">
+        <PageH title="Revenue overview" sub="Month-to-date · all geos · USD-settled" />
+        <Card style={{ padding: '18px 20px' }}><Dim>Loading overview data...</Dim></Card>
+      </div>
+    );
+  }
+  const kpis = buildOverviewKpis(ov, apiTenants);
+  const weeks = buildOverviewWeeks(ov.trailingWeeks);
+  const tokenMix = buildTokenMix(ov.tokenMix);
+  const topModels = ov.topModels
+    ? ov.topModels.map(m => ({ name: m.sku, rev: fmtMoney(m.amount), tok: '' }))
+    : [];
+  const alerts = buildOverviewAlerts(ov);
+  const pipeColor = ov.meteringStatus.driftExceeded > 0 || ov.meteringStatus.dlqDepth > 5 ? '#B1380B' : '#3D7317';
+  const pipeSummary = ov.meteringStatus.driftExceeded > 0
+    ? `Drift exceeded on ${ov.meteringStatus.driftExceeded} report(s) · DLQ depth: ${ov.meteringStatus.dlqDepth}`
+    : `Healthy — DLQ depth: ${ov.meteringStatus.dlqDepth}`;
+
+  const topTenants = ov.topTenants
     ? ov.topTenants.map(t => ({ tenant_id: t.tenantId, name: t.displayName, mtd_spend: t.amount }))
     : apiTenants
       ? apiTenants.map(t => ({ ...t, tid: t.tenant_id, mtdN: parseFloat(t.mtd_spend || '0') })).sort((a, b) => b.mtdN - a.mtdN).slice(0, 5)
-      : D.tenants.slice(0, 5);
+      : [];
 
   return (
     <div data-screen-label="Revenue overview">
@@ -133,6 +164,7 @@ export function Overview({ D, apiTenants, apiOverview, onTenant, goMetering }) {
               <Mono>{t.mtd || fmtMoney(t.mtd_spend)}</Mono>
             </div>
           ))}
+          {topTenants.length === 0 && <Dim>No tenant data available.</Dim>}
         </Card>
         <Card>
           <SecTitle style={{ marginBottom: 10 }}>Top models (MTD)</SecTitle>
@@ -143,6 +175,7 @@ export function Overview({ D, apiTenants, apiOverview, onTenant, goMetering }) {
               {m.tok && <Dim style={{ width: 56, textAlign: 'right' }}>{m.tok}</Dim>}
             </div>
           ))}
+          {topModels.length === 0 && <Dim>No model data available.</Dim>}
         </Card>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Card style={{ padding: '14px 18px', borderLeft: `4px solid ${pipeColor}` }}>
@@ -167,6 +200,8 @@ export function Overview({ D, apiTenants, apiOverview, onTenant, goMetering }) {
     </div>
   );
 }
+
+/* ── Models & pricing ── */
 
 function fmtRate(r) {
   if (!r) return '---';
@@ -200,26 +235,32 @@ function mapPriceBookGeoRates(pb) {
   return Object.values(byModel);
 }
 
-export function Models({ D, apiPriceBooks }) {
+export function Models({ apiPriceBooks }) {
   const pb = apiPriceBooks && apiPriceBooks.length > 0 ? apiPriceBooks[0] : null;
-  const models = pb ? mapPriceBookToModels(pb) : D.models;
-  const geoRates = pb ? mapPriceBookGeoRates(pb) : D.geoRates;
-  const volTiers = pb && pb.volumeTiers ? pb.volumeTiers.map(vt => ({
+  if (!pb) {
+    return (
+      <div data-screen-label="Models & pricing">
+        <PageH title="Model catalog & pricing" sub="A SKU is model × geo × price version. Rates are per 1M tokens." right={<Btn primary>Add model</Btn>} />
+        <Card style={{ padding: '18px 20px' }}><Dim>No price books configured. Create a PriceBook CR to define model pricing.</Dim></Card>
+      </div>
+    );
+  }
+  const models = mapPriceBookToModels(pb);
+  const geoRates = mapPriceBookGeoRates(pb);
+  const volTiers = pb.volumeTiers ? pb.volumeTiers.map(vt => ({
     band: `≥ ${fmtTokens(vt.thresholdTokens)} tokens / mo`,
     disc: `-${vt.discountPct}%`,
-  })) : D.volTiers;
-  const committed = pb && pb.committedUse ? pb.committedUse.map(cu => ({
+  })) : [];
+  const committed = pb.committedUse ? pb.committedUse.map(cu => ({
     band: `Reserved ${cu.tokensPerSecond} TPS (${cu.name})`,
     price: fmtMoney(cu.monthlyPrice) + ' /mo',
-  })) : D.committed;
-  const pbName = pb ? pb.name : 'llama-4-maverick-fp8';
-  const pbEffective = pb ? pb.effectiveFrom?.slice(0, 10) : '2026-03-15';
-  const pbState = pb ? pb.state : 'Active';
+  })) : [];
+  const pbName = pb.name;
+  const pbEffective = pb.effectiveFrom?.slice(0, 10) || '---';
+  const pbState = pb.state || 'Active';
 
-  const cols = pb ? '2fr .7fr .7fr .8fr .7fr .6fr' : '2fr 1.4fr 1.3fr .7fr .7fr .8fr .7fr .8fr .7fr .6fr';
-  const headers = pb
-    ? ['SKU', 'Input', 'Output', 'Reasoning', 'Cached', 'Price bk']
-    : ['Model', 'Serving', 'Geos', 'Input', 'Output', 'Reasoning', 'Cached', 'Margin', 'Status', 'Price bk'];
+  const cols = '2fr .7fr .7fr .8fr .7fr .6fr';
+  const headers = ['SKU', 'Input', 'Output', 'Reasoning', 'Cached', 'Price bk'];
   return (
     <div data-screen-label="Models & pricing">
       <PageH title="Model catalog & pricing" sub="A SKU is model × geo × price version. Rates are per 1M tokens." right={<Btn primary>Add model</Btn>} />
@@ -228,9 +269,7 @@ export function Models({ D, apiPriceBooks }) {
         {models.map((m, i) => (
           <TRow key={m.name + (m.geo || '') + i} cols={cols}>
             <div style={{ fontWeight: 600 }}>{m.name}{m.geo && m.geo !== '---' ? <Dim style={{ fontWeight: 400, marginLeft: 6 }}>({m.geo})</Dim> : null}</div>
-            {!pb && <><Dim>{m.kind}</Dim><Dim>{m.geos}</Dim></>}
             <Mono>{m.pin}</Mono><Mono>{m.pout}</Mono><Mono>{m.prsn}</Mono><Mono>{m.pcache}</Mono>
-            {!pb && <><div style={{ fontSize: 12 }}>{m.margin}</div><div><Badge c={m.st}>{m.status}</Badge></div></>}
             <Dim>{m.ver}</Dim>
           </TRow>
         ))}
@@ -276,20 +315,11 @@ export function Models({ D, apiPriceBooks }) {
           <div>
             <MiniLabel>PriceBook details</MiniLabel>
             <div style={{ padding: '8px 0', fontSize: 12.5, lineHeight: 1.5, color: '#4d4d4d' }}>
-              {pb ? <>
-                <div><b>Currency:</b> {pb.currency}</div>
-                <div><b>SKUs:</b> {pb.skuCount}</div>
-                <div><b>Active tenants:</b> {pb.activeTenants}</div>
-                {pb.providerFaultPolicy && <div><b>Provider fault:</b> {pb.providerFaultPolicy}</div>}
-                {pb.clientDisconnectPolicy && <div><b>Client disconnect:</b> {pb.clientDisconnectPolicy}</div>}
-              </> : <>
-                {D.priceVersions.map(p => (
-                  <div key={p.tag} style={{ display: 'flex', gap: 10, padding: '8px 0', borderBottom: '1px solid #f0f0f0', fontSize: 12, lineHeight: 1.45 }}>
-                    <Badge c={p.c} style={{ height: 'fit-content' }}>{p.tag}</Badge>
-                    <div>{p.text}</div>
-                  </div>
-                ))}
-              </>}
+              <div><b>Currency:</b> {pb.currency}</div>
+              <div><b>SKUs:</b> {pb.skuCount}</div>
+              <div><b>Active tenants:</b> {pb.activeTenants}</div>
+              {pb.providerFaultPolicy && <div><b>Provider fault:</b> {pb.providerFaultPolicy}</div>}
+              {pb.clientDisconnectPolicy && <div><b>Client disconnect:</b> {pb.clientDisconnectPolicy}</div>}
             </div>
           </div>
         </div>
@@ -297,6 +327,8 @@ export function Models({ D, apiPriceBooks }) {
     </div>
   );
 }
+
+/* ── Tenants ── */
 
 function badgeColor(status) {
   return { Active: 'green', Warning: 'gold', Grace: 'gold', Dunning: 'red', Frozen: 'red', Suspended: 'red', Pending: 'grey', Closed: 'grey' }[status] || 'grey';
@@ -316,8 +348,16 @@ function mapApiTenant(t) {
   };
 }
 
-export function Tenants({ D, apiTenants, onTenant }) {
-  const tenants = apiTenants ? apiTenants.map(mapApiTenant) : D.tenants;
+export function Tenants({ apiTenants, onTenant }) {
+  if (!apiTenants) {
+    return (
+      <div data-screen-label="Tenants">
+        <PageH title="Tenants" sub="Loading tenant data..." />
+        <Card style={{ padding: '18px 20px' }}><Dim>Loading...</Dim></Card>
+      </div>
+    );
+  }
+  const tenants = apiTenants.map(mapApiTenant);
   const activeCount = tenants.filter(t => t.status === 'Active').length;
   const lowBal = tenants.filter(t => t.st === 'gold' || (t.balColor === '#B1380B')).length;
   const frozenCount = tenants.filter(t => t.status === 'Frozen').length;
@@ -342,7 +382,9 @@ export function Tenants({ D, apiTenants, onTenant }) {
   );
 }
 
-export function TenantDetail({ D, td, tab, setTab, ledger, apiBudgets, apiKeys, apiExport, back, grantCredit, grantLabel, toggleFreeze, freezeLabel, goPlans }) {
+/* ── Tenant detail ── */
+
+export function TenantDetail({ td, tab, setTab, ledger, apiBudgets, apiKeys, apiExport, back, grantCredit, grantLabel, toggleFreeze, freezeLabel, goPlans }) {
   const tabs = [['balance', 'Balance & auto-reload'], ['budgets', 'Budgets & alerts'], ['keys', 'API keys'], ['chargeback', 'Chargeback']];
   return (
     <div data-screen-label="Tenant detail">
@@ -392,7 +434,7 @@ export function TenantDetail({ D, td, tab, setTab, ledger, apiBudgets, apiKeys, 
         <LedgerTable ledger={ledger} />
       </>}
 
-      {tab === 'budgets' && <BudgetsPanel D={D} apiBudgets={apiBudgets} />}
+      {tab === 'budgets' && <BudgetsPanel apiBudgets={apiBudgets} />}
 
       {tab === 'keys' && <>
         <Card style={{ padding: 0, overflow: 'hidden' }}>
@@ -400,7 +442,9 @@ export function TenantDetail({ D, td, tab, setTab, ledger, apiBudgets, apiKeys, 
             <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>API keys</div>
             <div style={{ marginLeft: 'auto' }}><Btn primary small>Create key</Btn></div>
           </div>
-          {apiKeys && apiKeys.keys ? <ApiKeysTable keys={apiKeys.keys} /> : <KeysTable keys={D.keys} />}
+          {apiKeys && apiKeys.keys ? <ApiKeysTable keys={apiKeys.keys} /> : (
+            <div style={{ padding: '12px 18px', fontSize: 12, color: '#6a6e73' }}>No API keys found for this tenant.</div>
+          )}
         </Card>
         <div style={{ background: '#E0F0FF', borderRadius: 8, padding: '12px 16px', fontSize: 12.5, color: '#003366', marginTop: 12 }}>
           Keys map to Authorino identities; scopes and per-key limits compile to AuthPolicy claims consumed by TokenRateLimitPolicy predicates.
@@ -434,16 +478,7 @@ export function TenantDetail({ D, td, tab, setTab, ledger, apiBudgets, apiKeys, 
               })()}
             </>
           ) : (
-            <>
-              <THead cols="1fr 1.4fr 1fr 1fr 1fr 1fr .8fr" labels={['Cost center', 'Project', 'Input tok', 'Output tok', 'Reasoning', 'Cost', 'Share']} />
-              {D.chargeback.map(c => (
-                <TRow key={c.project} cols="1fr 1.4fr 1fr 1fr 1fr 1fr .8fr">
-                  <Mono>{c.cc}</Mono><div style={{ fontWeight: 600 }}>{c.project}</div>
-                  <Mono>{c.tin}</Mono><Mono>{c.tout}</Mono><Mono>{c.trsn}</Mono><Mono>{c.cost}</Mono>
-                  <div><Progress w={c.w} h={7} /></div>
-                </TRow>
-              ))}
-            </>
+            <div style={{ padding: '12px 18px', fontSize: 12, color: '#6a6e73' }}>No chargeback data available for this tenant.</div>
           )}
         </Card>
         <Dim style={{ marginTop: 10 }}>FOCUS export maps token usage to the FinOps Open Cost & Usage Specification so tenants can ingest into Cloudability, CloudHealth, etc. Attribution key: API key → project → cost center (set per key).</Dim>
@@ -451,6 +486,8 @@ export function TenantDetail({ D, td, tab, setTab, ledger, apiBudgets, apiKeys, 
     </div>
   );
 }
+
+/* ── Ledger table ── */
 
 export function LedgerTable({ ledger }) {
   const cols = '1.1fr 1fr 2fr 1fr 1fr';
@@ -468,6 +505,8 @@ export function LedgerTable({ ledger }) {
     </Card>
   );
 }
+
+/* ── Keys tables ── */
 
 export function KeysTable({ keys }) {
   const cols = '1.2fr 1.2fr 2fr 1fr .9fr .8fr .9fr';
@@ -506,7 +545,9 @@ function ApiKeysTable({ keys }) {
   </>);
 }
 
-export function BudgetsPanel({ D, addButtons, apiBudgets }) {
+/* ── Budgets panel (shared by TenantDetail and TBudgets) ── */
+
+export function BudgetsPanel({ addButtons, apiBudgets }) {
   const hasBudgets = apiBudgets && apiBudgets.budgets && apiBudgets.budgets.length > 0;
   if (hasBudgets) {
     const budgets = apiBudgets.budgets;
@@ -565,33 +606,21 @@ export function BudgetsPanel({ D, addButtons, apiBudgets }) {
     <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 14 }}>
       <Card style={{ padding: '18px 20px' }}>
         <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
-          <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Project budgets</div>
+          <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Budgets</div>
           {addButtons && <div style={{ marginLeft: 'auto' }}><Btn small>Add budget</Btn></div>}
         </div>
-        {D.budgets.map(b => (
-          <div key={b.name} style={{ padding: '10px 0', borderTop: '1px solid #f5f5f5' }}>
-            <div style={{ display: 'flex', fontSize: 13 }}>
-              <div style={{ fontWeight: 600 }}>{b.name}</div>
-              <Mono style={{ marginLeft: 'auto' }}>{b.used} / {b.cap}</Mono>
-            </div>
-            <div style={{ marginTop: 8 }}><Progress w={b.w} color={b.color} /></div>
-            <div style={{ fontSize: 11, color: '#6a6e73', marginTop: 5 }}>{b.note}</div>
-          </div>
-        ))}
+        <Dim>No budgets configured. Create a BudgetPolicy CR to set spending limits.</Dim>
       </Card>
       <Card style={{ padding: '18px 20px' }}>
         <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 600, marginBottom: 8 }}>Alert rules</div>
-        {D.alertRules.map(r => (
-          <div key={r.when} style={{ display: 'flex', gap: 10, padding: '9px 0', borderTop: '1px solid #f5f5f5', fontSize: 12.5, lineHeight: 1.45 }}>
-            <div style={{ flex: 1 }}><b>{r.when}</b><div style={{ color: '#6a6e73', marginTop: 2 }}>{r.then}</div></div>
-            <Badge c="green" style={{ height: 'fit-content' }}>On</Badge>
-          </div>
-        ))}
+        <Dim>No alert rules configured.</Dim>
         <div style={{ marginTop: 12 }}><Btn small>Add rule</Btn></div>
       </Card>
     </div>
   );
 }
+
+/* ── Plans & rate limits ── */
 
 function fmtTokens(n) {
   if (n == null) return 'Custom';
@@ -619,8 +648,16 @@ function mapApiPlan(p) {
   };
 }
 
-export function Plans({ D, plan, setPlan, apiPlans }) {
-  const plans = apiPlans ? apiPlans.map(mapApiPlan) : D.plans;
+export function Plans({ plan, setPlan, apiPlans }) {
+  if (!apiPlans) {
+    return (
+      <div data-screen-label="Plans & rate limits">
+        <PageH title="Plans & rate limits" sub="Loading plans..." />
+        <Card style={{ padding: '18px 20px' }}><Dim>Loading...</Dim></Card>
+      </div>
+    );
+  }
+  const plans = apiPlans.map(mapApiPlan);
   const sel = plans.find(p => p.name === plan) || plans[0];
   if (!sel) return <div data-screen-label="Plans & rate limits"><PageH title="Plans & rate limits" sub="No plans configured." /></div>;
   const allUpToDate = sel.compiledPolicies && sel.compiledPolicies.length > 0 && sel.compiledPolicies.every(cp => cp.upToDate);
@@ -659,7 +696,7 @@ export function Plans({ D, plan, setPlan, apiPlans }) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           <Card>
             <div style={{ fontFamily: DISPLAY, fontSize: 14, fontWeight: 600, marginBottom: 8 }}>How enforcement layers stack</div>
-            {D.enfLayers.map(e => (
+            {ENF_LAYERS.map(e => (
               <div key={e.layer} style={{ display: 'flex', gap: 10, padding: '8px 0', borderTop: '1px solid #f5f5f5', fontSize: 12.5, lineHeight: 1.45 }}>
                 <div style={{ width: 110, flexShrink: 0, fontWeight: 600 }}>{e.layer}</div>
                 <div style={{ color: '#4d4d4d' }}>{e.desc}</div>
@@ -674,6 +711,8 @@ export function Plans({ D, plan, setPlan, apiPlans }) {
     </div>
   );
 }
+
+/* ── Usage explorer ── */
 
 const selStyle = { fontFamily: "'Red Hat Text',sans-serif", fontSize: 13, padding: '7px 10px', border: '1px solid #c7c7c7', borderRadius: 6, background: '#fff' };
 
@@ -741,23 +780,31 @@ function buildUsageRows(points) {
   return rows;
 }
 
-export function UsageExplorer({ D, apiUsage }) {
+export function UsageExplorer({ apiUsage }) {
   const hasApi = apiUsage && apiUsage.points && apiUsage.points.length > 0;
-  const days = hasApi ? buildUsageDays(apiUsage.points) : D.days;
-  const usageRows = hasApi ? buildUsageRows(apiUsage.points) : D.usageRows;
+  if (!hasApi) {
+    return (
+      <div data-screen-label="Usage explorer">
+        <PageH title="Usage explorer" sub="Query the usage ledger. Every row is backed by per-request events, deduplicated on request_id." />
+        <Card style={{ padding: '18px 20px' }}><Dim>No usage data available yet. Usage appears here once metering events flow through the pipeline.</Dim></Card>
+      </div>
+    );
+  }
+  const days = buildUsageDays(apiUsage.points);
+  const usageRows = buildUsageRows(apiUsage.points);
   const cols = '1.8fr 1fr .9fr 1fr 1fr 1fr 1fr 1fr';
   return (
     <div data-screen-label="Usage explorer">
       <PageH title="Usage explorer" sub="Query the usage ledger. Every row is backed by per-request events, deduplicated on request_id." />
       <Card style={{ padding: '12px 16px', display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
         <select style={selStyle}><option>Last 14 days</option><option>MTD</option><option>Custom…</option></select>
-        <select style={selStyle}><option>All tenants</option><option>Helix Biotech</option><option>Kestrel Financial</option></select>
-        <select style={selStyle}><option>All models</option><option>llama-4-maverick-fp8</option><option>granite-4.0-h-small</option></select>
-        <select style={selStyle}><option>All geos</option><option>us-east-1</option><option>eu-central-1</option><option>ap-south-1</option></select>
+        <select style={selStyle}><option>All tenants</option></select>
+        <select style={selStyle}><option>All models</option></select>
+        <select style={selStyle}><option>All geos</option></select>
         <select style={selStyle}><option>Group by: model</option><option>Group by: tenant</option><option>Group by: API key</option><option>Group by: geo</option></select>
         <div style={{ marginLeft: 'auto' }}><Btn small>Export</Btn></div>
       </Card>
-      <div style={{ marginBottom: 14 }}><Stacked days={days} legend={D.usageLegend} title="Tokens by type, daily" /></div>
+      <div style={{ marginBottom: 14 }}><Stacked days={days} legend={USAGE_LEGEND} title="Tokens by type, daily" /></div>
       <Card style={{ padding: 0, overflow: 'hidden' }}>
         <THead cols={cols} labels={['Model', 'Geo', 'Requests', 'Input', 'Output', 'Reasoning', 'Cached', 'Billed']} />
         {usageRows.map((u, i) => (
@@ -770,6 +817,8 @@ export function UsageExplorer({ D, apiUsage }) {
     </div>
   );
 }
+
+/* ── Billing operations ── */
 
 function mapApiConnectors(connectors) {
   return connectors.map(c => ({
@@ -837,12 +886,12 @@ function buildDunningFromTenants(tenants) {
     }));
 }
 
-export function Billing({ D, dunning, apiConnectors, apiInvoiceRuns, apiWebhooks, apiCredits, apiTenants }) {
-  const connectors = apiConnectors ? mapApiConnectors(apiConnectors) : D.connectors;
-  const invoiceRuns = apiInvoiceRuns ? mapApiInvoiceRuns(apiInvoiceRuns) : D.invoiceRuns;
-  const webhookLog = apiWebhooks ? mapApiWebhooks(apiWebhooks) : D.webhookLog;
-  const grants = apiCredits ? mapApiCredits(apiCredits) : D.grants;
-  const dunningQueue = apiTenants ? buildDunningFromTenants(apiTenants) : dunning;
+export function Billing({ apiConnectors, apiInvoiceRuns, apiWebhooks, apiCredits, apiTenants }) {
+  const connectors = apiConnectors ? mapApiConnectors(apiConnectors) : [];
+  const invoiceRuns = apiInvoiceRuns ? mapApiInvoiceRuns(apiInvoiceRuns) : [];
+  const webhookLog = apiWebhooks ? mapApiWebhooks(apiWebhooks) : [];
+  const grants = apiCredits ? mapApiCredits(apiCredits) : [];
+  const dunningQueue = buildDunningFromTenants(apiTenants);
 
   return (
     <div data-screen-label="Billing operations">
@@ -889,7 +938,7 @@ export function Billing({ D, dunning, apiConnectors, apiInvoiceRuns, apiWebhooks
               </div>
               <Dim style={{ marginTop: 4 }}>{d.detail}</Dim>
               <div style={{ display: 'flex', gap: 12, fontSize: 12, marginTop: 6 }}>
-                <a href="#" onClick={e => { e.preventDefault(); d.retry && d.retry(); }}>{d.a1}</a>
+                <a href="#" onClick={e => e.preventDefault()}>{d.a1}</a>
                 {d.a2 && <a href="#" onClick={e => e.preventDefault()} style={{ color: '#B1380B' }}>{d.a2}</a>}
               </div>
             </div>
@@ -924,108 +973,104 @@ export function Billing({ D, dunning, apiConnectors, apiInvoiceRuns, apiWebhooks
   );
 }
 
-export function Cost({ D }) {
+/* ── Cost & margin ── */
+
+export function Cost({ apiOverview }) {
+  const topModels = apiOverview && apiOverview.topModels
+    ? apiOverview.topModels.map(m => ({ name: m.sku, rev: fmtMoney(m.amount) }))
+    : [];
   return (
     <div data-screen-label="Cost & margin">
-      <PageH title="Cost & margin" sub="GPU fleet cost vs. token revenue, per model. Pass-through spend tracked separately." />
-      <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>{D.costKpis.map(k => <Kpi key={k.label} {...k} />)}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1.15fr 1fr', gap: 14 }}>
+      <PageH title="Cost & margin" sub="Per-SKU revenue analysis. Full cost modeling, GPU fleet economics, and pass-through margin tracking arrive in M8." />
+      {topModels.length > 0 ? (
         <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 18px', fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Hosted models — unit economics (per day)</div>
-          <THead cols="1.7fr 1fr 1fr .8fr 1.4fr" labels={['Model', 'Revenue', 'Serving cost', 'Margin', '']} />
-          {D.modelMargins.map(m => (
-            <TRow key={m.name} cols="1.7fr 1fr 1fr .8fr 1.4fr">
-              <div style={{ fontWeight: 600 }}>{m.name}</div><Mono>{m.rev}</Mono><Mono>{m.cost}</Mono>
-              <div style={{ fontWeight: 600, color: m.mColor }}>{m.margin}</div>
-              <div><Progress w={m.w} color={m.mColor} h={7} /></div>
+          <div style={{ padding: '14px 18px', fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Revenue by SKU (MTD)</div>
+          <THead cols="2fr 1fr" labels={['Model', 'Revenue']} />
+          {topModels.map(m => (
+            <TRow key={m.name} cols="2fr 1fr">
+              <div style={{ fontWeight: 600 }}>{m.name}</div>
+              <Mono>{m.rev}</Mono>
             </TRow>
           ))}
-          <div style={{ padding: '12px 18px', borderTop: '1px solid #f0f0f0', fontSize: 12, color: '#6a6e73' }}>
-            Serving cost = amortized GPU-hr × utilization share + energy/overhead allocator. qwen3-coder preview is under target margin (52%) — candidates: raise output rate or densify onto shared pool.
-          </div>
         </Card>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Card style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '14px 18px', fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>GPU fleet</div>
-            <THead cols="1.4fr 1fr .9fr .7fr .9fr" labels={['Pool', 'GPUs', 'Region', 'Util', 'Cost/day']} />
-            {D.pools.map(p => (
-              <TRow key={p.name} cols="1.4fr 1fr .9fr .7fr .9fr" style={{ fontSize: 12.5 }}>
-                <Mono style={{ fontWeight: 600 }}>{p.name}</Mono><Dim>{p.gpus}</Dim><Dim>{p.region}</Dim>
-                <div style={{ color: p.uColor, fontWeight: 600 }}>{p.util}</div><Mono>{p.cost}</Mono>
-              </TRow>
-            ))}
-          </Card>
-          <Card style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ padding: '14px 18px', fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Pass-through providers (MTD)</div>
-            {D.passThrough.map(p => (
-              <div key={p.name} style={{ display: 'flex', gap: 10, padding: '10px 18px', borderTop: '1px solid #f0f0f0', fontSize: 13, alignItems: 'center' }}>
-                <div style={{ flex: 1, fontWeight: 600 }}>{p.name}</div>
-                <Dim>spend {p.spend}</Dim><Dim>billed {p.billed}</Dim>
-                <div style={{ fontWeight: 600, color: '#204D00' }}>{p.margin}</div>
-              </div>
-            ))}
-            <div style={{ padding: '10px 18px', borderTop: '1px solid #f0f0f0', fontSize: 12, color: '#6a6e73' }}>
-              Markup 12% + FX buffer. Provider price cuts flow to tenants on next price-book version.
-            </div>
-          </Card>
-        </div>
+      ) : (
+        <Card style={{ padding: '18px 20px' }}><Dim>No revenue data available yet.</Dim></Card>
+      )}
+      <div style={{ background: '#E0F0FF', borderRadius: 8, padding: '14px 16px', fontSize: 12.5, color: '#003366', lineHeight: 1.55, marginTop: 14 }}>
+        <b>Coming in M8:</b> GPU fleet cost tracking, per-model unit economics, pass-through provider margin analysis, and automated price book recommendations based on cost trends.
       </div>
     </div>
   );
 }
 
-export function Metering({ D }) {
+/* ── Metering pipeline health ── */
+
+export function Metering({ apiHealth, apiDrift }) {
+  const dlqDepth = apiHealth?.dlqDepth;
+  const watermark = apiHealth?.watermark;
+  const driftExceeded = apiHealth?.driftExceeded;
+  const ingestRate = apiHealth?.ingestRate;
+
+  const lagSec = watermark && watermark !== '0001-01-01T00:00:00Z'
+    ? Math.round((Date.now() - new Date(watermark).getTime()) / 1000) : null;
+  const healthy = apiHealth != null && (dlqDepth == null || dlqDepth < 100) && (lagSec == null || lagSec < 60);
+
+  const meterKpis = apiHealth ? [
+    { label: 'DLQ depth', value: dlqDepth != null ? String(dlqDepth) : '---', delta: dlqDepth > 0 ? 'events awaiting replay' : 'all clear', border: dlqDepth > 100 ? '#B1380B' : '#3D7317' },
+    { label: 'Ingest watermark lag', value: lagSec != null ? `${lagSec}s` : '---', delta: 'time behind real-time', border: lagSec != null && lagSec > 60 ? '#B1380B' : '#3D7317' },
+    { label: 'Ingest rate (1h)', value: ingestRate != null ? fmtTokenCount(ingestRate) + ' events' : '---', delta: 'events ingested in the last hour', border: '#3D7317' },
+  ] : [];
+
+  const driftReports = apiDrift && apiDrift.reports ? apiDrift.reports : [];
+
   return (
     <div data-screen-label="Metering pipeline health">
-      <PageH title="Metering pipeline health" sub="Per-request usage events from the gateway, through Loki, into the billing ledger. This page is why tenants trust the invoice." />
-      <div style={{ display: 'flex', alignItems: 'stretch', marginBottom: 16 }}>
-        {D.stages.map((s, i) => (
-          <div key={s.name} style={{ flex: 1, display: 'flex', alignItems: 'stretch' }}>
-            <Card style={{ flex: 1, padding: '14px 16px', borderTop: `3px solid ${s.color}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                <div style={{ width: 9, height: 9, borderRadius: '50%', background: s.color }} />
-                <div style={{ fontFamily: DISPLAY, fontSize: 13, fontWeight: 700 }}>{s.name}</div>
-              </div>
-              <div style={{ fontFamily: MONO, fontSize: 16, fontWeight: 600, marginTop: 8, color: s.vColor }}>{s.metric}</div>
-              <div style={{ fontSize: 11.5, color: '#6a6e73', marginTop: 4, lineHeight: 1.4 }}>{s.sub}</div>
-            </Card>
-            {i < D.stages.length - 1 && <div style={{ display: 'flex', alignItems: 'center', padding: '0 6px', color: '#8a8d90', fontSize: 16 }}>→</div>}
-          </div>
-        ))}
-      </div>
-      <div style={{ display: 'flex', gap: 14, marginBottom: 16 }}>{D.meterKpis.map(k => <Kpi key={k.label} {...k} />)}</div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1.3fr 1fr', gap: 14 }}>
-        <Card style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '14px 18px', fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Reconciliation — gateway ledger vs. engine-reported usage</div>
-          <THead cols="1fr 1.6fr 1.1fr 1.1fr .8fr .9fr" labels={['Day', 'Model', 'Gateway tok', 'Engine tok', 'Drift', 'Status']} />
-          {D.recon.map((r, i) => (
-            <TRow key={i} cols="1fr 1.6fr 1.1fr 1.1fr .8fr .9fr" style={{ fontSize: 12.5 }}>
-              <Dim>{r.day}</Dim><div style={{ fontWeight: 600 }}>{r.model}</div>
-              <Mono>{r.gw}</Mono><Mono>{r.eng}</Mono>
-              <Mono style={{ color: r.ok ? '#204D00' : '#73480B' }}>{r.drift}</Mono>
-              <div><Badge c={r.ok ? 'green' : 'gold'}>{r.ok ? 'Within SLO' : 'Investigate'}</Badge></div>
-            </TRow>
-          ))}
-        </Card>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Card>
-            <div style={{ fontFamily: DISPLAY, fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Edge cases, last 24h</div>
-            {D.edgeCases.map(e => (
-              <div key={e.label} style={{ display: 'flex', gap: 10, padding: '8px 0', borderTop: '1px solid #f5f5f5', fontSize: 12.5, alignItems: 'baseline' }}>
-                <div style={{ flex: 1 }}>{e.label}</div><Mono style={{ fontWeight: 600 }}>{e.value}</Mono>
-              </div>
-            ))}
+      <PageH title="Metering pipeline health" sub="Per-request usage events from the gateway into the billing ledger. This page is why tenants trust the invoice." />
+      {apiHealth ? (
+        <>
+          <Card style={{ padding: '14px 18px', marginBottom: 14, borderLeft: `4px solid ${healthy ? '#3D7317' : '#B1380B'}` }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 9, height: 9, borderRadius: '50%', background: healthy ? '#3D7317' : '#B1380B' }} />
+              <div style={{ fontFamily: DISPLAY, fontSize: 14, fontWeight: 600 }}>Pipeline {healthy ? 'healthy' : 'degraded'}</div>
+            </div>
           </Card>
-          <div style={{ background: '#E0F0FF', borderRadius: 8, padding: '14px 16px', fontSize: 12.5, color: '#003366', lineHeight: 1.55 }}>
-            <b>Architecture note:</b> Limitador enforces, it does not meter. Billing events come from structured gateway access logs (Envoy ext-proc emits the full usage object per request) shipped via Vector to Loki, then compacted into the ClickHouse ledger. Loki retains raw logs 90 days for audit replay; Prometheus is used for ops, never for invoicing.
-          </div>
-        </div>
+          <div style={{ display: 'flex', gap: 14, marginBottom: 16 }}>{meterKpis.map(k => <Kpi key={k.label} {...k} />)}</div>
+        </>
+      ) : (
+        <Card style={{ padding: '18px 20px', marginBottom: 14 }}><Dim>Connecting to metering health endpoint...</Dim></Card>
+      )}
+      {driftReports.length > 0 && (
+        <Card style={{ padding: 0, overflow: 'hidden', marginBottom: 14 }}>
+          <div style={{ padding: '14px 18px', fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Drift reports</div>
+          <THead cols="1fr 1.6fr 1fr 1fr .8fr .9fr" labels={['Window', 'Tenant', 'Prom tok', 'Ledger tok', 'Drift', 'Status']} />
+          {driftReports.map((r, i) => {
+            const dp = r.drift_pct != null ? parseFloat(r.drift_pct) : null;
+            const driftPct = dp != null ? `${dp > 0 ? '+' : ''}${dp.toFixed(2)}%` : '---';
+            const ok = !r.exceeded;
+            const windowLabel = r.window_start ? new Date(r.window_start).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' }) : '---';
+            return (
+              <TRow key={i} cols="1fr 1.6fr 1fr 1fr .8fr .9fr" style={{ fontSize: 12.5 }}>
+                <Dim>{windowLabel}</Dim>
+                <div style={{ fontWeight: 600 }}>{r.tenant_id || '---'}</div>
+                <Mono>{fmtTokenCount(r.prom_tokens)}</Mono>
+                <Mono>{fmtTokenCount(r.ledger_tokens)}</Mono>
+                <Mono style={{ color: ok ? '#204D00' : '#73480B' }}>{driftPct}</Mono>
+                <div><Badge c={ok ? 'green' : 'gold'}>{ok ? 'Within SLO' : 'Investigate'}</Badge></div>
+              </TRow>
+            );
+          })}
+        </Card>
+      )}
+      <div style={{ background: '#E0F0FF', borderRadius: 8, padding: '14px 16px', fontSize: 12.5, color: '#003366', lineHeight: 1.55 }}>
+        <b>Architecture note:</b> Limitador enforces, it does not meter. Billing events come from structured gateway access logs shipped via the capture filter to the billing ledger. The ledger is the source of truth; balance enforcement tolerates drift between Limitador counters and the ledger.
       </div>
     </div>
   );
 }
 
-export function ApiSurface({ D }) {
+/* ── API surface ── */
+
+export function ApiSurface() {
   return (
     <div data-screen-label="API reference">
       <PageH title="API surface" sub="The contract in and out of the platform — data plane, metering, management, webhooks, and the Kubernetes control plane underneath." />
@@ -1036,7 +1081,7 @@ export function ApiSurface({ D }) {
             <span style={{ fontFamily: MONO, fontSize: 12 }}>/v1/chat/completions · /v1/embeddings · /v1/models</span> — existing SDKs keep working. Billing context rides on response headers and the usage object.
           </div>
           <div style={{ marginTop: 12 }}>
-            {D.apiHeaders.map(h => (
+            {API_HEADERS.map(h => (
               <div key={h.name} style={{ display: 'flex', gap: 12, padding: '7px 0', borderTop: '1px solid #f5f5f5', fontSize: 12.5 }}>
                 <div style={{ fontFamily: MONO, fontSize: 11.5, width: 250, flexShrink: 0, color: '#0066CC' }}>{h.name}</div>
                 <div style={{ color: '#4d4d4d' }}>{h.desc}</div>
@@ -1057,7 +1102,7 @@ export function ApiSurface({ D }) {
         <Card style={{ padding: '18px 20px' }}>
           <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 700 }}>3 · Management API (tenant- and provider-facing)</div>
           <div style={{ marginTop: 10 }}>
-            {D.apiMgmt.map(m => (
+            {API_MGMT.map(m => (
               <div key={m.path} style={{ display: 'flex', gap: 12, padding: '7px 0', borderTop: '1px solid #f5f5f5', fontSize: 12.5, alignItems: 'baseline' }}>
                 <span style={{ fontFamily: MONO, fontSize: 10.5, fontWeight: 600, width: 44, flexShrink: 0, textAlign: 'center', padding: '2px 0', borderRadius: 4, background: PAL[m.c].bg, color: PAL[m.c].fg }}>{m.verb}</span>
                 <div style={{ fontFamily: MONO, fontSize: 11.5, width: 290, flexShrink: 0 }}>{m.path}</div>
@@ -1070,7 +1115,7 @@ export function ApiSurface({ D }) {
           <Card style={{ padding: '18px 20px' }}>
             <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 700 }}>4 · Webhooks out</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
-              {D.webhookTypes.map(w => (
+              {WEBHOOK_TYPES.map(w => (
                 <span key={w} style={{ fontFamily: MONO, fontSize: 11.5, background: '#f5f5f5', borderRadius: 12, padding: '4px 12px', color: '#4d4d4d' }}>{w}</span>
               ))}
             </div>
@@ -1078,7 +1123,7 @@ export function ApiSurface({ D }) {
           </Card>
           <Card style={{ padding: '18px 20px' }}>
             <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 700 }}>5 · Control plane (what it compiles to)</div>
-            {D.controlPlane.map(c => (
+            {CONTROL_PLANE.map(c => (
               <div key={c.cr} style={{ display: 'flex', gap: 12, padding: '8px 0', borderTop: '1px solid #f5f5f5', fontSize: 12.5 }}>
                 <div style={{ fontFamily: MONO, fontSize: 11.5, width: 210, flexShrink: 0, color: '#0066CC' }}>{c.cr}</div>
                 <div style={{ color: '#4d4d4d', lineHeight: 1.45 }}>{c.desc}</div>

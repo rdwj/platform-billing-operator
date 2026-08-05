@@ -832,6 +832,34 @@ func (s *Store) QueryDriftReports(ctx context.Context, tenantID string, limit in
 	return reports, rows.Err()
 }
 
+func (s *Store) QueryDriftReportsAll(ctx context.Context, limit int) ([]DriftReport, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, tenant_id, window_start, window_end, ledger_tokens, prom_tokens,
+			drift_pct, tolerance_pct, exceeded, signature, created_at
+		FROM drift_reports
+		ORDER BY created_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query drift reports all: %w", err)
+	}
+	defer rows.Close()
+
+	var reports []DriftReport
+	for rows.Next() {
+		var r DriftReport
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.WindowStart, &r.WindowEnd,
+			&r.LedgerTokens, &r.PromTokens, &r.DriftPct, &r.TolerancePct,
+			&r.Exceeded, &r.Signature, &r.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan drift report: %w", err)
+		}
+		reports = append(reports, r)
+	}
+	return reports, rows.Err()
+}
+
 func (s *Store) QueryLatestDriftReport(ctx context.Context, tenantID string) (*DriftReport, error) {
 	var r DriftReport
 	err := s.pool.QueryRow(ctx, `
@@ -1457,6 +1485,29 @@ func (s *Store) QueryDriftExceededCount(ctx context.Context) (int64, error) {
 		  AND created_at > now() - interval '24 hours'`).Scan(&count)
 	if err != nil {
 		return 0, fmt.Errorf("query drift exceeded: %w", err)
+	}
+	return count, nil
+}
+
+func (s *Store) QueryWatermark(ctx context.Context) (time.Time, error) {
+	var ts time.Time
+	err := s.pool.QueryRow(ctx,
+		"SELECT value::timestamptz FROM ledger_meta WHERE key = 'watermark_ts'").Scan(&ts)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("query watermark: %w", err)
+	}
+	return ts, nil
+}
+
+func (s *Store) QueryIngestEventRate(ctx context.Context) (int64, error) {
+	var count int64
+	err := s.pool.QueryRow(ctx,
+		"SELECT count(*) FROM usage_events WHERE event_ts > now() - interval '1 hour'").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("query ingest event rate: %w", err)
 	}
 	return count, nil
 }

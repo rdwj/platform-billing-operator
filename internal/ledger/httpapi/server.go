@@ -37,6 +37,7 @@ func NewServer(ingester *ledger.Ingester, store *ledger.Store, k8sReader client.
 	mux.Handle("/v1/connectors", &connectorsHandler{reader: k8sReader, defaultNS: defaultNS})
 	mux.Handle("/v1/webhooks", &webhooksHandler{store: store})
 	mux.Handle("/v1/overview", &overviewHandler{store: store, reader: k8sReader, defaultNS: defaultNS})
+	mux.Handle("/v1/health", &healthHandler{store: store})
 	mux.HandleFunc("/healthz", handleHealthz)
 	return mux
 }

@@ -34,18 +34,43 @@ func (h *driftHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tenant := r.URL.Query().Get("tenant")
-	if tenant == "" {
-		writeError(w, http.StatusBadRequest, "tenant is required")
-		return
-	}
 
 	// Dispatch: /v1/drift/latest vs /v1/drift
 	path := strings.TrimPrefix(r.URL.Path, "/v1/drift")
 	if path == "/latest" {
+		if tenant == "" {
+			writeError(w, http.StatusBadRequest, "tenant is required for /latest")
+			return
+		}
 		h.handleLatest(w, r, tenant)
 		return
 	}
+	if tenant == "" {
+		h.handleListAll(w, r)
+		return
+	}
 	h.handleList(w, r, tenant)
+}
+
+func (h *driftHandler) handleListAll(w http.ResponseWriter, r *http.Request) {
+	limit := 20
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	reports, err := h.store.QueryDriftReportsAll(r.Context(), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	resp := make([]driftReportResponse, 0, len(reports))
+	for _, rpt := range reports {
+		resp = append(resp, toDriftResponse(rpt))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"reports": resp})
 }
 
 func (h *driftHandler) handleList(w http.ResponseWriter, r *http.Request, tenant string) {
