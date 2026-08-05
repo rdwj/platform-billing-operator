@@ -2,26 +2,115 @@ import React from 'react';
 import { Card, PageH, SecTitle, MiniLabel, Kpi, Badge, Btn, THead, TRow, Mono, Dim, Progress, Bars, Stacked, Pre, DISPLAY, MONO, PAL } from './ui.jsx';
 import { planYaml, jsonUsage, jsonEvent, jsonWebhook } from './data.js';
 
-export function Overview({ D, apiTenants, onTenant, goMetering }) {
-  const topTenants = apiTenants
-    ? apiTenants.map(t => ({ ...t, tid: t.tenant_id, mtdN: parseFloat(t.mtd_spend || '0') })).sort((a, b) => b.mtdN - a.mtdN).slice(0, 5)
-    : D.tenants.slice(0, 5);
+function fmtMoney(v) {
+  if (!v || v === '0' || v === '0.000000') return '$0.00';
+  const n = parseFloat(v);
+  if (isNaN(n)) return '---';
+  const abs = Math.abs(n);
+  const s = abs >= 1000 ? '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    : abs >= 1 ? '$' + abs.toFixed(2) : '$' + abs.toFixed(4);
+  return n < 0 ? '−' + s : s;
+}
+
+function fmtTokenCount(n) {
+  if (n == null || isNaN(n)) return '0';
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(n);
+}
+
+function buildOverviewKpis(ov, apiTenants) {
+  const mtd = parseFloat(ov.revenueKpis.mtdRevenue);
+  const delta = ov.revenueKpis.deltaPct;
+  const tokenTotal = ov.tokenMix.reduce((s, t) => s + t.total, 0);
+  const tenantCount = apiTenants ? apiTenants.length : 0;
+  const alertStates = ov.alerts.tenantStates || {};
+  const lowBal = (alertStates['Warning'] || 0);
+  const frozenCount = (alertStates['Frozen'] || 0);
+  return [
+    { label: 'Usage revenue · MTD', value: fmtMoney(ov.revenueKpis.mtdRevenue), delta: `${parseFloat(delta) >= 0 ? '+' : ''}${delta}% vs prior month`, deltaColor: parseFloat(delta) >= 0 ? '#204D00' : '#B1380B' },
+    { label: 'Tokens served · MTD', value: fmtTokenCount(tokenTotal), delta: ov.tokenMix.map(t => `${fmtTokenCount(t.total)} ${t.quantityType.replace('_tokens', '')}`).join(' · '), deltaColor: '#6a6e73' },
+    { label: 'Active tenants', value: String(tenantCount), delta: `${lowBal} low balance · ${frozenCount} frozen`, deltaColor: lowBal > 0 ? '#73480B' : '#6a6e73' },
+    { label: 'Trailing 30d revenue', value: fmtMoney(ov.revenueKpis.trailing30d), delta: `Prior month: ${fmtMoney(ov.revenueKpis.priorMonth)}`, deltaColor: '#6a6e73' }
+  ];
+}
+
+function buildOverviewWeeks(weeks) {
+  if (!weeks || weeks.length === 0) return [];
+  const maxRev = Math.max(1, ...weeks.map(w => parseFloat(w.revenue)));
+  return weeks.map(w => {
+    const rev = parseFloat(w.revenue);
+    const dt = new Date(w.weekStart);
+    const label = dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' });
+    return { h: Math.max(2, Math.round((rev / maxRev) * 100)) + 'px', label, tip: `${label}: ${fmtMoney(w.revenue)}` };
+  });
+}
+
+function buildTokenMix(mix) {
+  const COLORS = { prompt_tokens: '#0066CC', completion_tokens: '#009596', reasoning_tokens: '#5752D1', cached_tokens: '#F0AB00' };
+  const LABELS = { prompt_tokens: 'Input', completion_tokens: 'Output', reasoning_tokens: 'Reasoning', cached_tokens: 'Cached reads' };
+  const total = mix.reduce((s, t) => s + t.total, 0) || 1;
+  return mix.map(t => ({
+    label: LABELS[t.quantityType] || t.quantityType,
+    amt: fmtTokenCount(t.total),
+    rev: '',
+    w: Math.max(1, Math.round((t.total / total) * 100)) + '%',
+    color: COLORS[t.quantityType] || '#8a8d90',
+    tip: `${LABELS[t.quantityType] || t.quantityType}: ${fmtTokenCount(t.total)} tokens`,
+  }));
+}
+
+function buildOverviewAlerts(ov) {
+  const alerts = [];
+  const states = ov.alerts.tenantStates || {};
+  if (states['Frozen'] > 0) alerts.push({ color: '#B1380B', text: `${states['Frozen']} tenant(s) frozen — keys suspended.` });
+  if (states['Dunning'] > 0) alerts.push({ color: '#B1380B', text: `${states['Dunning']} tenant(s) in dunning — payment collection in progress.` });
+  if (states['Grace'] > 0) alerts.push({ color: '#F0AB00', text: `${states['Grace']} tenant(s) in grace period — balance depleted, keys still active.` });
+  if (states['Warning'] > 0) alerts.push({ color: '#F0AB00', text: `${states['Warning']} tenant(s) in warning — low balance detected.` });
+  if (ov.alerts.firedBudgets > 0) alerts.push({ color: '#F0AB00', text: `${ov.alerts.firedBudgets} budget threshold(s) fired this period.` });
+  if (alerts.length === 0) alerts.push({ color: '#3D7317', text: 'No active alerts — all tenants healthy.' });
+  return alerts;
+}
+
+export function Overview({ D, apiTenants, apiOverview, onTenant, goMetering }) {
+  const ov = apiOverview;
+  const kpis = ov ? buildOverviewKpis(ov, apiTenants) : D.kpis;
+  const weeks = ov ? buildOverviewWeeks(ov.trailingWeeks) : D.weeks;
+  const tokenMix = ov ? buildTokenMix(ov.tokenMix) : D.tokenMix;
+  const topModels = ov && ov.topModels
+    ? ov.topModels.map(m => ({ name: m.sku, rev: fmtMoney(m.amount), tok: '' }))
+    : D.topModels;
+  const alerts = ov ? buildOverviewAlerts(ov) : D.alerts;
+  const pipeColor = ov ? (ov.meteringStatus.driftExceeded > 0 || ov.meteringStatus.dlqDepth > 5 ? '#B1380B' : '#3D7317') : D.pipeColor;
+  const pipeSummary = ov
+    ? (ov.meteringStatus.driftExceeded > 0
+      ? `Drift exceeded on ${ov.meteringStatus.driftExceeded} report(s) · DLQ depth: ${ov.meteringStatus.dlqDepth}`
+      : `Healthy — DLQ depth: ${ov.meteringStatus.dlqDepth}`)
+    : D.pipeSummary;
+
+  const topTenants = ov && ov.topTenants
+    ? ov.topTenants.map(t => ({ tenant_id: t.tenantId, name: t.displayName, mtd_spend: t.amount }))
+    : apiTenants
+      ? apiTenants.map(t => ({ ...t, tid: t.tenant_id, mtdN: parseFloat(t.mtd_spend || '0') })).sort((a, b) => b.mtdN - a.mtdN).slice(0, 5)
+      : D.tenants.slice(0, 5);
+
   return (
     <div data-screen-label="Revenue overview">
       <PageH title="Revenue overview" sub="Month-to-date · all geos · USD-settled" />
-      <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>{D.kpis.map(k => <Kpi key={k.label} {...k} />)}</div>
+      <div style={{ display: 'flex', gap: 14, marginBottom: 14 }}>{kpis.map(k => <Kpi key={k.label} {...k} />)}</div>
       <div style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr', gap: 14, marginBottom: 14 }}>
         <Card style={{ padding: '18px 20px' }}>
           <SecTitle right={<Dim>weekly, settled</Dim>}>Usage revenue, trailing 12 weeks</SecTitle>
-          <Bars weeks={D.weeks} />
+          <Bars weeks={weeks} />
         </Card>
         <Card style={{ padding: '18px 20px', display: 'flex', flexDirection: 'column' }}>
           <SecTitle>Token mix, MTD</SecTitle>
           <div style={{ display: 'flex', height: 14, borderRadius: 7, overflow: 'hidden', marginTop: 16 }}>
-            {D.tokenMix.map(t => <div key={t.label} title={t.tip} style={{ width: t.w, background: t.color }} />)}
+            {tokenMix.map(t => <div key={t.label} title={t.tip} style={{ width: t.w, background: t.color }} />)}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 16 }}>
-            {D.tokenMix.map(t => (
+            {tokenMix.map(t => (
               <div key={t.label} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                 <div style={{ width: 10, height: 10, borderRadius: 3, background: t.color }} />
                 <div style={{ flex: 1 }}>{t.label}</div>
@@ -47,26 +136,26 @@ export function Overview({ D, apiTenants, onTenant, goMetering }) {
         </Card>
         <Card>
           <SecTitle style={{ marginBottom: 10 }}>Top models (MTD)</SecTitle>
-          {D.topModels.map(m => (
+          {topModels.map(m => (
             <div key={m.name} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: '1px solid #f5f5f5', fontSize: 13 }}>
               <div style={{ flex: 1, fontWeight: 500 }}>{m.name}</div>
               <Mono>{m.rev}</Mono>
-              <Dim style={{ width: 56, textAlign: 'right' }}>{m.tok}</Dim>
+              {m.tok && <Dim style={{ width: 56, textAlign: 'right' }}>{m.tok}</Dim>}
             </div>
           ))}
         </Card>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          <Card style={{ padding: '14px 18px', borderLeft: `4px solid ${D.pipeColor}` }}>
+          <Card style={{ padding: '14px 18px', borderLeft: `4px solid ${pipeColor}` }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <div style={{ width: 9, height: 9, borderRadius: '50%', background: D.pipeColor }} />
+              <div style={{ width: 9, height: 9, borderRadius: '50%', background: pipeColor }} />
               <div style={{ fontFamily: DISPLAY, fontSize: 14, fontWeight: 600 }}>Metering pipeline</div>
               <a href="#" onClick={e => { e.preventDefault(); goMetering(); }} style={{ marginLeft: 'auto', fontSize: 12 }}>Detail</a>
             </div>
-            <div style={{ fontSize: 12, color: '#4d4d4d', marginTop: 6 }}>{D.pipeSummary}</div>
+            <div style={{ fontSize: 12, color: '#4d4d4d', marginTop: 6 }}>{pipeSummary}</div>
           </Card>
           <Card style={{ padding: '14px 18px', flex: 1 }}>
             <div style={{ fontFamily: DISPLAY, fontSize: 14, fontWeight: 600, marginBottom: 8 }}>Needs attention</div>
-            {D.alerts.map((a, i) => (
+            {alerts.map((a, i) => (
               <div key={i} style={{ display: 'flex', gap: 8, padding: '6px 0', borderTop: '1px solid #f5f5f5', fontSize: 12, lineHeight: 1.4 }}>
                 <div style={{ width: 8, height: 8, borderRadius: '50%', background: a.color, marginTop: 4, flexShrink: 0 }} />
                 <div>{a.text}</div>
@@ -207,15 +296,6 @@ export function Models({ D, apiPriceBooks }) {
       </Card>
     </div>
   );
-}
-
-function fmtMoney(v) {
-  if (!v || v === '0' || v === '0.000000') return '$0.00';
-  const n = parseFloat(v);
-  if (isNaN(n)) return '---';
-  const abs = Math.abs(n);
-  const s = '$' + abs.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return n < 0 ? '−' + s : s;
 }
 
 function badgeColor(status) {
@@ -691,12 +771,84 @@ export function UsageExplorer({ D, apiUsage }) {
   );
 }
 
-export function Billing({ D, dunning }) {
+function mapApiConnectors(connectors) {
+  return connectors.map(c => ({
+    name: c.name,
+    status: c.connected ? 'Connected' : 'Disconnected',
+    st: c.connected ? 'green' : 'red',
+    top: c.type === 'stripe' ? '#635BFF' : '#8a8d90',
+    desc: `Type: ${c.type}` + (c.sync ? ` · Usage sync: ${c.sync.usageRecordsInterval} · Invoice sync: ${c.sync.invoiceInterval}` : ''),
+    action: 'Configure',
+  }));
+}
+
+function mapApiInvoiceRuns(runs) {
+  return runs.map(r => {
+    const statuses = Object.keys(r.statusBreakdown || {});
+    const mainStatus = statuses.includes('finalized') ? 'Settled' : statuses.includes('draft') ? 'Accruing' : statuses[0] || 'Unknown';
+    const st = mainStatus === 'Settled' ? 'green' : mainStatus === 'Accruing' ? 'blue' : 'grey';
+    return {
+      period: r.period,
+      count: String(r.tenantCount),
+      amount: fmtMoney(r.totalAmount),
+      status: mainStatus,
+      st,
+      action: mainStatus === 'Accruing' ? 'Preview' : 'View',
+    };
+  });
+}
+
+function mapApiWebhooks(webhooks) {
+  return webhooks.map(w => {
+    const code = w.status_code != null ? String(w.status_code) : 'pending';
+    const ok = w.status_code != null && w.status_code >= 200 && w.status_code < 300;
+    const dt = w.created_at ? new Date(w.created_at) : null;
+    const when = dt ? dt.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+    return {
+      event: w.event_type,
+      dest: (() => { try { const h = new URL(w.endpoint).hostname; return w.tenant_id ? `${w.tenant_id} · ${h}` : h; } catch { return w.endpoint; } })(),
+      code: ok ? code : w.attempts > 1 ? `${code} · retry` : code,
+      st: ok ? 'green' : 'red',
+      when,
+    };
+  });
+}
+
+function mapApiCredits(credits) {
+  return credits.map(c => {
+    const dt = new Date(c.created_at);
+    return {
+      text: `${c.kind === 'manual_credit' ? 'Credit' : c.kind} — ${c.reason}`,
+      amt: fmtMoney(c.amount),
+      when: dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    };
+  });
+}
+
+function buildDunningFromTenants(tenants) {
+  if (!tenants) return [];
+  return tenants
+    .filter(t => t.status === 'Dunning' || t.status === 'Frozen')
+    .map(t => ({
+      tenant: t.name || t.tenant_id,
+      amount: fmtMoney(t.balance),
+      detail: `Status: ${t.status} · Balance: ${fmtMoney(t.balance)}`,
+      a1: 'View', a2: 'Freeze keys',
+    }));
+}
+
+export function Billing({ D, dunning, apiConnectors, apiInvoiceRuns, apiWebhooks, apiCredits, apiTenants }) {
+  const connectors = apiConnectors ? mapApiConnectors(apiConnectors) : D.connectors;
+  const invoiceRuns = apiInvoiceRuns ? mapApiInvoiceRuns(apiInvoiceRuns) : D.invoiceRuns;
+  const webhookLog = apiWebhooks ? mapApiWebhooks(apiWebhooks) : D.webhookLog;
+  const grants = apiCredits ? mapApiCredits(apiCredits) : D.grants;
+  const dunningQueue = apiTenants ? buildDunningFromTenants(apiTenants) : dunning;
+
   return (
     <div data-screen-label="Billing operations">
-      <PageH title="Billing operations" sub="Rated usage flows to the connected billing provider. Corvid stays the metering source of truth." />
+      <PageH title="Billing operations" sub="Rated usage flows to the connected billing provider. The billing ledger stays the metering source of truth." />
       <div style={{ display: 'flex', gap: 14, marginBottom: 16 }}>
-        {D.connectors.map(c => (
+        {connectors.length > 0 ? connectors.map(c => (
           <Card key={c.name} style={{ flex: 1, borderTop: `3px solid ${c.top}` }}>
             <div style={{ display: 'flex', alignItems: 'center' }}>
               <div style={{ fontFamily: DISPLAY, fontSize: 15, fontWeight: 700 }}>{c.name}</div>
@@ -705,26 +857,31 @@ export function Billing({ D, dunning }) {
             <div style={{ fontSize: 12.5, color: '#4d4d4d', marginTop: 8, lineHeight: 1.5 }}>{c.desc}</div>
             <div style={{ fontSize: 12, marginTop: 10 }}><a href="#" onClick={e => e.preventDefault()}>{c.action}</a></div>
           </Card>
-        ))}
+        )) : (
+          <Card style={{ flex: 1, padding: '18px 20px' }}>
+            <Dim>No billing connectors configured. Create a BillingConnector CR to connect a payment provider.</Dim>
+          </Card>
+        )}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 14, marginBottom: 14 }}>
         <Card style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '14px 18px', fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Invoice runs</div>
           <THead cols="1fr .9fr 1fr 1fr 1fr" labels={['Period', 'Invoices', 'Amount', 'Status', '']} />
-          {D.invoiceRuns.map(i => (
+          {invoiceRuns.map(i => (
             <TRow key={i.period} cols="1fr .9fr 1fr 1fr 1fr">
               <div style={{ fontWeight: 600 }}>{i.period}</div><Mono>{i.count}</Mono><Mono>{i.amount}</Mono>
               <div><Badge c={i.st}>{i.status}</Badge></div>
               <div style={{ fontSize: 12 }}><a href="#" onClick={e => e.preventDefault()}>{i.action}</a></div>
             </TRow>
           ))}
+          {invoiceRuns.length === 0 && <div style={{ padding: '12px 18px', fontSize: 12, color: '#6a6e73' }}>No invoice runs yet.</div>}
           <div style={{ padding: '12px 18px', borderTop: '1px solid #f0f0f0', fontSize: 12, color: '#6a6e73' }}>
-            Prepaid reloads are recognized as deferred revenue; usage draws recognize on consumption (rev-rec export → Zuora Revenue / NetSuite).
+            Prepaid reloads are recognized as deferred revenue; usage draws recognize on consumption (rev-rec export).
           </div>
         </Card>
         <Card style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '14px 18px', fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Dunning queue</div>
-          {dunning.map(d => (
+          {dunningQueue.map(d => (
             <div key={d.tenant} style={{ padding: '12px 18px', borderTop: '1px solid #f0f0f0' }}>
               <div style={{ display: 'flex', fontSize: 13, alignItems: 'center' }}>
                 <div style={{ fontWeight: 600 }}>{d.tenant}</div>
@@ -733,31 +890,34 @@ export function Billing({ D, dunning }) {
               <Dim style={{ marginTop: 4 }}>{d.detail}</Dim>
               <div style={{ display: 'flex', gap: 12, fontSize: 12, marginTop: 6 }}>
                 <a href="#" onClick={e => { e.preventDefault(); d.retry && d.retry(); }}>{d.a1}</a>
-                <a href="#" onClick={e => e.preventDefault()} style={{ color: '#B1380B' }}>{d.a2}</a>
+                {d.a2 && <a href="#" onClick={e => e.preventDefault()} style={{ color: '#B1380B' }}>{d.a2}</a>}
               </div>
             </div>
           ))}
+          {dunningQueue.length === 0 && <div style={{ padding: '12px 18px', fontSize: 12, color: '#6a6e73' }}>No tenants in dunning.</div>}
         </Card>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
         <Card style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '14px 18px', fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Credit grants</div>
-          {D.grants.map(g => (
+          {grants.map(g => (
             <div key={g.text} style={{ display: 'flex', gap: 10, padding: '10px 18px', borderTop: '1px solid #f0f0f0', fontSize: 12.5, alignItems: 'center' }}>
               <div style={{ flex: 1 }}>{g.text}</div><Mono>{g.amt}</Mono><div style={{ color: '#6a6e73', fontSize: 11 }}>{g.when}</div>
             </div>
           ))}
+          {grants.length === 0 && <div style={{ padding: '12px 18px', fontSize: 12, color: '#6a6e73' }}>No credit grants recorded.</div>}
         </Card>
         <Card style={{ padding: 0, overflow: 'hidden' }}>
           <div style={{ padding: '14px 18px', fontFamily: DISPLAY, fontSize: 15, fontWeight: 600 }}>Webhook deliveries</div>
-          {D.webhookLog.map(w => (
-            <div key={w.event + w.when} style={{ display: 'flex', gap: 10, padding: '9px 18px', borderTop: '1px solid #f0f0f0', fontSize: 12, alignItems: 'center' }}>
+          {webhookLog.map((w, idx) => (
+            <div key={w.event + w.when + idx} style={{ display: 'flex', gap: 10, padding: '9px 18px', borderTop: '1px solid #f0f0f0', fontSize: 12, alignItems: 'center' }}>
               <div style={{ fontFamily: MONO, color: '#4d4d4d', flex: 1 }}>{w.event}</div>
               <div style={{ color: '#6a6e73' }}>{w.dest}</div>
               <Badge c={w.st} style={{ padding: '1px 8px', fontSize: 11 }}>{w.code}</Badge>
               <div style={{ color: '#8a8d90', fontSize: 11, width: 52, textAlign: 'right' }}>{w.when}</div>
             </div>
           ))}
+          {webhookLog.length === 0 && <div style={{ padding: '12px 18px', fontSize: 12, color: '#6a6e73' }}>No webhook deliveries recorded.</div>}
         </Card>
       </div>
     </div>

@@ -9,7 +9,7 @@ metadata:
   name: ledger-svc-billing-reader
 rules:
   - apiGroups: ["billing.opendatahub.io"]
-    resources: ["pricebooks", "plans", "tenantaccounts", "budgetpolicies"]
+    resources: ["pricebooks", "plans", "tenantaccounts", "budgetpolicies", "billingconnectors"]
     verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

@@ -7,15 +7,13 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// NewServer returns an http.Handler with billing-api routes:
-// /v1/ingest, /v1/usage, /v1/balance, /v1/adjustments, /v1/pricing,
-// /v1/keys, /v1/keys/disable, /v1/keys/enable, /v1/ledger, /v1/budgets,
-// /v1/drift, /v1/drift/latest, /v1/export, /v1/tenants, /healthz.
+// NewServer returns an http.Handler with billing-api routes.
 //
-// k8sReader is a Kubernetes client.Reader used by the pricing handler to resolve
-// PriceBook CRs. It may be nil if no kubeconfig is available; in that case
-// /v1/pricing returns 503. defaultNS is the namespace used when the caller does
-// not supply a namespace query parameter.
+// k8sReader is a Kubernetes client.Reader used by handlers that resolve CRs
+// (pricing, tenants, plans, pricebooks, budgets, connectors, overview).
+// It may be nil if no kubeconfig is available; in that case those endpoints
+// return 503. defaultNS is the namespace used when the caller does not supply
+// a namespace query parameter.
 func NewServer(ingester *ledger.Ingester, store *ledger.Store, k8sReader client.Reader, defaultNS string) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/v1/ingest", &ingestHandler{ingester: ingester})
@@ -36,6 +34,9 @@ func NewServer(ingester *ledger.Ingester, store *ledger.Store, k8sReader client.
 	mux.Handle("/v1/keys", &keysHandler{store: store})
 	mux.Handle("/v1/keys/disable", &keysHandler{store: store})
 	mux.Handle("/v1/keys/enable", &keysHandler{store: store})
+	mux.Handle("/v1/connectors", &connectorsHandler{reader: k8sReader, defaultNS: defaultNS})
+	mux.Handle("/v1/webhooks", &webhooksHandler{store: store})
+	mux.Handle("/v1/overview", &overviewHandler{store: store, reader: k8sReader, defaultNS: defaultNS})
 	mux.HandleFunc("/healthz", handleHealthz)
 	return mux
 }

@@ -158,3 +158,42 @@ type InvoiceWithLines struct {
 	Invoice
 	Lines []InvoiceLine `json:"lines"`
 }
+
+type WebhookDelivery struct {
+	DeliveryID  string
+	EventType   string
+	TenantID    string
+	Endpoint    string
+	StatusCode  *int
+	Attempts    int
+	NextRetryAt *time.Time
+	DeliveredAt *time.Time
+	CreatedAt   time.Time
+}
+
+type InvoiceRun struct {
+	Period          string
+	TenantCount     int
+	TotalAmount     string
+	StatusBreakdown map[string]int
+}
+
+type WeekBucket struct {
+	WeekStart time.Time
+	Revenue   string
+}
+
+type TokenMixEntry struct {
+	QuantityType string
+	Total        int64
+}
+
+type TenantSpend struct {
+	TenantID string
+	Amount   string
+}
+
+type ModelRevenue struct {
+	SKU    string
+	Amount string
+}

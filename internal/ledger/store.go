@@ -1174,6 +1174,293 @@ func (s *Store) GetInvoiceWithLines(ctx context.Context, invoiceID string) (*Inv
 	return &inv, rows.Err()
 }
 
+func (s *Store) QueryWebhookDeliveries(ctx context.Context, limit int) ([]WebhookDelivery, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT delivery_id, event_type, COALESCE(tenant_id, ''), endpoint,
+			status_code, attempts, next_retry_at, delivered_at, created_at
+		FROM webhook_deliveries
+		ORDER BY created_at DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query webhook deliveries: %w", err)
+	}
+	defer rows.Close()
+
+	var deliveries []WebhookDelivery
+	for rows.Next() {
+		var d WebhookDelivery
+		if err := rows.Scan(&d.DeliveryID, &d.EventType, &d.TenantID, &d.Endpoint,
+			&d.StatusCode, &d.Attempts, &d.NextRetryAt, &d.DeliveredAt, &d.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan webhook delivery: %w", err)
+		}
+		deliveries = append(deliveries, d)
+	}
+	return deliveries, rows.Err()
+}
+
+func (s *Store) QueryInvoiceRuns(ctx context.Context, limit int) ([]InvoiceRun, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT period, count(*) AS tenant_count,
+			COALESCE(sum(total), 0) AS total_amount, status
+		FROM invoices
+		GROUP BY period, status
+		ORDER BY period DESC
+		LIMIT $1`, limit*10)
+	if err != nil {
+		return nil, fmt.Errorf("query invoice runs: %w", err)
+	}
+	defer rows.Close()
+
+	byPeriod := make(map[string]*InvoiceRun)
+	var periods []string
+	for rows.Next() {
+		var period, totalAmount, status string
+		var count int
+		if err := rows.Scan(&period, &count, &totalAmount, &status); err != nil {
+			return nil, fmt.Errorf("scan invoice run: %w", err)
+		}
+		run, ok := byPeriod[period]
+		if !ok {
+			run = &InvoiceRun{
+				Period:          period,
+				StatusBreakdown: make(map[string]int),
+			}
+			byPeriod[period] = run
+			periods = append(periods, period)
+		}
+		run.TenantCount += count
+		run.StatusBreakdown[status] += count
+		existing, _ := decimal.NewFromString(run.TotalAmount)
+		add, _ := decimal.NewFromString(totalAmount)
+		run.TotalAmount = existing.Add(add).StringFixed(6)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]InvoiceRun, 0, len(periods))
+	for _, p := range periods {
+		if len(result) >= limit {
+			break
+		}
+		result = append(result, *byPeriod[p])
+	}
+	return result, nil
+}
+
+func (s *Store) ListAdjustmentsAll(ctx context.Context, kind string, limit int) ([]AdjustmentRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var rows pgx.Rows
+	var err error
+	if kind != "" {
+		rows, err = s.pool.Query(ctx, `
+			SELECT adjustment_id, tenant_id, amount, kind, reason, idempotency_key, created_at
+			FROM adjustments
+			WHERE kind = $1
+			ORDER BY created_at DESC
+			LIMIT $2`, kind, limit)
+	} else {
+		rows, err = s.pool.Query(ctx, `
+			SELECT adjustment_id, tenant_id, amount, kind, reason, idempotency_key, created_at
+			FROM adjustments
+			ORDER BY created_at DESC
+			LIMIT $1`, limit)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list adjustments all: %w", err)
+	}
+	defer rows.Close()
+
+	var adjustments []AdjustmentRow
+	for rows.Next() {
+		var row AdjustmentRow
+		var idempKey sql.NullString
+		if err := rows.Scan(&row.ID, &row.TenantID, &row.Amount, &row.Kind,
+			&row.Reason, &idempKey, &row.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan adjustment row: %w", err)
+		}
+		if idempKey.Valid {
+			row.IdempotencyKey = idempKey.String
+		}
+		adjustments = append(adjustments, row)
+	}
+	return adjustments, rows.Err()
+}
+
+func (s *Store) QueryMTDRevenue(ctx context.Context) (current string, prior string, err error) {
+	err = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(sum(amount), 0)
+		FROM charges
+		WHERE rated_at >= date_trunc('month', now())`).Scan(&current)
+	if err != nil {
+		return "", "", fmt.Errorf("query mtd revenue: %w", err)
+	}
+	err = s.pool.QueryRow(ctx, `
+		SELECT COALESCE(sum(amount), 0)
+		FROM charges
+		WHERE rated_at >= date_trunc('month', now() - interval '1 month')
+		  AND rated_at < date_trunc('month', now())`).Scan(&prior)
+	if err != nil {
+		return "", "", fmt.Errorf("query prior month revenue: %w", err)
+	}
+	return current, prior, nil
+}
+
+func (s *Store) QueryTrailing30dRevenue(ctx context.Context) (string, error) {
+	var revenue string
+	err := s.pool.QueryRow(ctx, `
+		SELECT COALESCE(sum(amount), 0)
+		FROM charges
+		WHERE rated_at >= now() - interval '30 days'`).Scan(&revenue)
+	if err != nil {
+		return "", fmt.Errorf("query trailing 30d revenue: %w", err)
+	}
+	return revenue, nil
+}
+
+func (s *Store) QueryWeeklyRevenue(ctx context.Context, weeks int) ([]WeekBucket, error) {
+	if weeks <= 0 || weeks > 52 {
+		weeks = 12
+	}
+	interval := fmt.Sprintf("%d weeks", weeks)
+	rows, err := s.pool.Query(ctx, `
+		SELECT date_trunc('week', rated_at) AS week_start,
+			COALESCE(sum(amount), 0) AS revenue
+		FROM charges
+		WHERE rated_at >= now() - $1::interval
+		GROUP BY week_start
+		ORDER BY week_start`, interval)
+	if err != nil {
+		return nil, fmt.Errorf("query weekly revenue: %w", err)
+	}
+	defer rows.Close()
+
+	var buckets []WeekBucket
+	for rows.Next() {
+		var b WeekBucket
+		if err := rows.Scan(&b.WeekStart, &b.Revenue); err != nil {
+			return nil, fmt.Errorf("scan week bucket: %w", err)
+		}
+		buckets = append(buckets, b)
+	}
+	return buckets, rows.Err()
+}
+
+func (s *Store) QueryTokenMix(ctx context.Context) ([]TokenMixEntry, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT 'prompt_tokens', COALESCE(sum(prompt_tokens), 0)
+		FROM usage_events WHERE event_ts >= date_trunc('month', now())
+		UNION ALL
+		SELECT 'completion_tokens', COALESCE(sum(completion_tokens), 0)
+		FROM usage_events WHERE event_ts >= date_trunc('month', now())
+		UNION ALL
+		SELECT 'reasoning_tokens', COALESCE(sum(reasoning_tokens), 0)
+		FROM usage_events WHERE event_ts >= date_trunc('month', now())
+		UNION ALL
+		SELECT 'cached_tokens', COALESCE(sum(cached_tokens), 0)
+		FROM usage_events WHERE event_ts >= date_trunc('month', now())`)
+	if err != nil {
+		return nil, fmt.Errorf("query token mix: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []TokenMixEntry
+	for rows.Next() {
+		var e TokenMixEntry
+		if err := rows.Scan(&e.QuantityType, &e.Total); err != nil {
+			return nil, fmt.Errorf("scan token mix: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+func (s *Store) QueryTopTenantsBySpend(ctx context.Context, limit int) ([]TenantSpend, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 5
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT tenant_id, COALESCE(sum(amount), 0) AS total
+		FROM charges
+		WHERE rated_at >= date_trunc('month', now())
+		GROUP BY tenant_id
+		ORDER BY total DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query top tenants: %w", err)
+	}
+	defer rows.Close()
+
+	var tenants []TenantSpend
+	for rows.Next() {
+		var t TenantSpend
+		if err := rows.Scan(&t.TenantID, &t.Amount); err != nil {
+			return nil, fmt.Errorf("scan tenant spend: %w", err)
+		}
+		tenants = append(tenants, t)
+	}
+	return tenants, rows.Err()
+}
+
+func (s *Store) QueryTopModelsByRevenue(ctx context.Context, limit int) ([]ModelRevenue, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 5
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT ue.sku, COALESCE(sum(c.amount), 0) AS total
+		FROM charges c
+		JOIN usage_events ue ON c.record_id = ue.record_id
+		WHERE c.rated_at >= date_trunc('month', now())
+		GROUP BY ue.sku
+		ORDER BY total DESC
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query top models: %w", err)
+	}
+	defer rows.Close()
+
+	var models []ModelRevenue
+	for rows.Next() {
+		var m ModelRevenue
+		if err := rows.Scan(&m.SKU, &m.Amount); err != nil {
+			return nil, fmt.Errorf("scan model revenue: %w", err)
+		}
+		models = append(models, m)
+	}
+	return models, rows.Err()
+}
+
+func (s *Store) QueryDLQDepth(ctx context.Context) (int64, error) {
+	var count int64
+	err := s.pool.QueryRow(ctx,
+		"SELECT count(*) FROM dlq WHERE replayed_at IS NULL").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("query dlq depth: %w", err)
+	}
+	return count, nil
+}
+
+func (s *Store) QueryDriftExceededCount(ctx context.Context) (int64, error) {
+	var count int64
+	err := s.pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM drift_reports
+		WHERE exceeded = true
+		  AND created_at > now() - interval '24 hours'`).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("query drift exceeded: %w", err)
+	}
+	return count, nil
+}
+
 func splitPageToken(token string) []string {
 	idx := strings.LastIndex(token, "|")
 	if idx < 0 {

@@ -4,7 +4,7 @@ import { DISPLAY, PAL } from './ui.jsx';
 import { Overview, Models, Tenants, TenantDetail, Plans, UsageExplorer, Billing, Cost, Metering, ApiSurface } from './screens-provider.jsx';
 import { TOverview, TModels, TUsage, TBilling, TBudgets, TKeys } from './screens-tenant.jsx';
 import Integrations from './screens-integrations.jsx';
-import { fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport, fetchPlans, fetchPriceBooks, fetchUsage } from './api.js';
+import { fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport, fetchPlans, fetchPriceBooks, fetchUsage, fetchOverview, fetchConnectors, fetchWebhooks, fetchInvoiceRuns, fetchAdjustmentsAll } from './api.js';
 
 function fmtMoney(v) {
   if (!v || v === '0' || v === '0.000000') return '$0.00';
@@ -108,6 +108,11 @@ export default function App() {
   const [apiPlans, setApiPlans] = useState(null);
   const [apiPriceBooks, setApiPriceBooks] = useState(null);
   const [apiUsage, setApiUsage] = useState(null);
+  const [apiOverview, setApiOverview] = useState(null);
+  const [apiConnectors, setApiConnectors] = useState(null);
+  const [apiWebhooks, setApiWebhooks] = useState(null);
+  const [apiInvoiceRuns, setApiInvoiceRuns] = useState(null);
+  const [apiCredits, setApiCredits] = useState(null);
 
   useEffect(() => {
     fetchTenants().then(data => {
@@ -124,6 +129,11 @@ export default function App() {
     fetchUsage({ from: from14, to: now.toISOString(), bucket: 'day' }).then(data => {
       if (data) setApiUsage(data);
     });
+    fetchOverview().then(data => { if (data) setApiOverview(data); });
+    fetchConnectors().then(data => { if (data && data.connectors) setApiConnectors(data.connectors); });
+    fetchWebhooks(20).then(data => { if (data && data.webhooks) setApiWebhooks(data.webhooks); });
+    fetchInvoiceRuns().then(data => { if (data && data.invoiceRuns) setApiInvoiceRuns(data.invoiceRuns); });
+    fetchAdjustmentsAll('manual_credit', 20).then(data => { if (data && data.adjustments) setApiCredits(data.adjustments); });
   }, []);
 
   useEffect(() => {
@@ -206,7 +216,7 @@ export default function App() {
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }}>
           <div style={{ padding: '22px 28px 40px', maxWidth: 1320 }}>
-            {prov && screen === 'overview' && <Overview D={D} apiTenants={apiTenants} onTenant={openTenant} goMetering={() => setScreen('metering')} />}
+            {prov && screen === 'overview' && <Overview D={D} apiTenants={apiTenants} apiOverview={apiOverview} onTenant={openTenant} goMetering={() => setScreen('metering')} />}
             {prov && screen === 'models' && <Models D={D} apiPriceBooks={apiPriceBooks} />}
             {prov && screen === 'plans' && <Plans D={D} plan={plan} setPlan={setPlan} apiPlans={apiPlans} />}
             {prov && screen === 'tenants' && !tenant && <Tenants D={D} apiTenants={apiTenants} onTenant={openTenant} />}
@@ -221,7 +231,7 @@ export default function App() {
             )}
             {prov && screen === 'usage' && <UsageExplorer D={D} apiUsage={apiUsage} />}
             {prov && screen === 'integrations' && <Integrations />}
-            {prov && screen === 'billing' && <Billing D={D} dunning={dunning} />}
+            {prov && screen === 'billing' && <Billing D={D} dunning={dunning} apiConnectors={apiConnectors} apiInvoiceRuns={apiInvoiceRuns} apiWebhooks={apiWebhooks} apiCredits={apiCredits} apiTenants={apiTenants} />}
             {prov && screen === 'cost' && <Cost D={D} />}
             {prov && screen === 'metering' && <Metering D={D} />}
             {prov && screen === 'api' && <ApiSurface D={D} />}

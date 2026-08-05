@@ -65,6 +65,28 @@ export function fetchPriceBooks() {
   return fetchJSON('/api/pricebooks');
 }
 
+export function fetchOverview() {
+  return fetchJSON('/api/overview');
+}
+
+export function fetchConnectors() {
+  return fetchJSON('/api/connectors');
+}
+
+export function fetchWebhooks(limit = 20) {
+  return fetchJSON(`/api/webhooks?limit=${limit}`);
+}
+
+export function fetchInvoiceRuns() {
+  return fetchJSON('/api/invoices');
+}
+
+export function fetchAdjustmentsAll(kind, limit = 20) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (kind) params.set('kind', kind);
+  return fetchJSON(`/api/adjustments?${params}`);
+}
+
 export function fetchWalkthroughs() {
   return fetchJSON('/api/walkthroughs');
 }

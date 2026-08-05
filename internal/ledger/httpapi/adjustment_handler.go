@@ -51,10 +51,6 @@ func (h *adjustmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (h *adjustmentHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 	tenant := r.URL.Query().Get("tenant")
-	if tenant == "" {
-		writeError(w, http.StatusBadRequest, "tenant is required")
-		return
-	}
 
 	limit := 50
 	if l := r.URL.Query().Get("limit"); l != "" {
@@ -63,7 +59,14 @@ func (h *adjustmentHandler) handleGet(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rows, err := h.store.ListAdjustments(r.Context(), tenant, limit)
+	var rows []ledger.AdjustmentRow
+	var err error
+	if tenant != "" {
+		rows, err = h.store.ListAdjustments(r.Context(), tenant, limit)
+	} else {
+		kind := r.URL.Query().Get("kind")
+		rows, err = h.store.ListAdjustmentsAll(r.Context(), kind, limit)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

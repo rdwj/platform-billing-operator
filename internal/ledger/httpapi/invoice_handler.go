@@ -38,18 +38,26 @@ func (h *invoiceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.handleList(w, r)
 }
 
+type invoiceRunResponse struct {
+	Period          string         `json:"period"`
+	TenantCount     int            `json:"tenantCount"`
+	TotalAmount     string         `json:"totalAmount"`
+	StatusBreakdown map[string]int `json:"statusBreakdown"`
+}
+
 func (h *invoiceHandler) handleList(w http.ResponseWriter, r *http.Request) {
 	tenant := r.URL.Query().Get("tenant")
-	if tenant == "" {
-		writeError(w, http.StatusBadRequest, "tenant is required")
-		return
-	}
 
 	limit := 20
 	if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := strconv.Atoi(l); err == nil && n > 0 {
 			limit = n
 		}
+	}
+
+	if tenant == "" {
+		h.handleListRuns(w, r, limit)
+		return
 	}
 
 	invoices, err := h.store.QueryInvoices(r.Context(), tenant, limit)
@@ -63,6 +71,25 @@ func (h *invoiceHandler) handleList(w http.ResponseWriter, r *http.Request) {
 		resp = append(resp, toInvoiceResponse(inv))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"invoices": resp})
+}
+
+func (h *invoiceHandler) handleListRuns(w http.ResponseWriter, r *http.Request, limit int) {
+	runs, err := h.store.QueryInvoiceRuns(r.Context(), limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	resp := make([]invoiceRunResponse, 0, len(runs))
+	for _, run := range runs {
+		resp = append(resp, invoiceRunResponse{
+			Period:          run.Period,
+			TenantCount:     run.TenantCount,
+			TotalAmount:     run.TotalAmount,
+			StatusBreakdown: run.StatusBreakdown,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"invoiceRuns": resp})
 }
 
 func (h *invoiceHandler) handleGet(w http.ResponseWriter, r *http.Request, invoiceID string) {
