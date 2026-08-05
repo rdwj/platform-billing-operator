@@ -9,9 +9,16 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+type tenantToken struct {
+	tenantID string
+	token    string
+}
 
 type config struct {
 	mode          string
@@ -37,7 +44,9 @@ func main() {
 	var cfg config
 	flag.StringVar(&cfg.mode, "mode", "gateway", "gateway or ingest")
 	flag.StringVar(&cfg.url, "url", "", "target URL (required)")
-	flag.StringVar(&cfg.token, "token", "", "bearer token (gateway mode)")
+	flag.StringVar(&cfg.token, "token", "", "bearer token (gateway mode, single tenant)")
+	var tokensFlag string
+	flag.StringVar(&tokensFlag, "tokens", "", "comma-separated tenant_id:token pairs for multi-tenant round-robin")
 	flag.IntVar(&cfg.concurrency, "concurrency", 10, "concurrent workers")
 	flag.DurationVar(&cfg.duration, "duration", 60*time.Second, "test duration")
 	flag.StringVar(&cfg.model, "model", "/mnt/models", "model name")
@@ -60,6 +69,35 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error: --stream-ratio must be between 0.0 and 1.0")
 		os.Exit(1)
 	}
+
+	// Build the tenant token list: --tokens takes precedence, fall back to --token.
+	var tenants []tenantToken
+	if tokensFlag != "" {
+		for _, pair := range strings.Split(tokensFlag, ",") {
+			pair = strings.TrimSpace(pair)
+			if pair == "" {
+				continue
+			}
+			parts := strings.SplitN(pair, ":", 2)
+			if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+				fmt.Fprintf(os.Stderr, "error: --tokens entry %q must be tenant_id:token\n", pair)
+				os.Exit(1)
+			}
+			tenants = append(tenants, tenantToken{tenantID: parts[0], token: parts[1]})
+		}
+		if len(tenants) == 0 {
+			fmt.Fprintln(os.Stderr, "error: --tokens provided but no valid entries parsed")
+			os.Exit(1)
+		}
+		fmt.Printf("Multi-tenant mode: %d tenants\n", len(tenants))
+		for _, t := range tenants {
+			fmt.Printf("  tenant %s\n", t.tenantID)
+		}
+	} else if cfg.token != "" {
+		tenants = []tenantToken{{tenantID: "default", token: cfg.token}}
+	}
+
+	var counter atomic.Uint64
 
 	client := &http.Client{
 		Transport: &http.Transport{
@@ -90,7 +128,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			worker(ctx, client, &cfg, results, ticker)
+			worker(ctx, client, &cfg, tenants, &counter, results, ticker)
 		}()
 	}
 
@@ -110,7 +148,7 @@ func main() {
 	printReport(&cfg, collected)
 }
 
-func worker(ctx context.Context, client *http.Client, cfg *config, out chan<- result, ticker *time.Ticker) {
+func worker(ctx context.Context, client *http.Client, cfg *config, tenants []tenantToken, counter *atomic.Uint64, out chan<- result, ticker *time.Ticker) {
 	for {
 		if ctx.Err() != nil {
 			return
@@ -128,8 +166,14 @@ func worker(ctx context.Context, client *http.Client, cfg *config, out chan<- re
 
 		switch cfg.mode {
 		case "gateway":
+			// Pick the token for this request via round-robin across tenants.
+			token := ""
+			if len(tenants) > 0 {
+				idx := counter.Add(1) - 1
+				token = tenants[idx%uint64(len(tenants))].token
+			}
 			stream := rand.Float64() < cfg.streamRatio
-			latency, err = GatewayRequest(ctx, client, cfg, stream)
+			latency, err = GatewayRequest(ctx, client, cfg, token, stream)
 		case "ingest":
 			latency, err = IngestRequest(ctx, client, cfg.url)
 		}
