@@ -1,0 +1,132 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package controller
+
+import (
+	"time"
+
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+
+	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
+)
+
+var _ = Describe("Reservation controller", func() {
+	var ns string
+
+	BeforeEach(func() {
+		ns = createTestNamespace(ctx, "reservation")
+	})
+
+	createReservation := func(name, tenant, sku, geo, class, price string, count int32, start, end time.Time) {
+		r := &billingv1alpha1.Reservation{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: ns,
+			},
+			Spec: billingv1alpha1.ReservationSpec{
+				TenantRef: tenant,
+				SKU:       sku,
+				Count:     count,
+				Geo:       geo,
+				Window: billingv1alpha1.ReservationWindow{
+					Start: metav1.NewTime(start),
+					End:   metav1.NewTime(end),
+				},
+				Class:        class,
+				MonthlyPrice: price,
+			},
+		}
+		Expect(k8sClient.Create(ctx, r)).To(Succeed())
+	}
+
+	fetchReservation := func(name string) billingv1alpha1.Reservation {
+		var r billingv1alpha1.Reservation
+		ExpectWithOffset(1, k8sClient.Get(ctx, types.NamespacedName{
+			Name: name, Namespace: ns,
+		}, &r)).To(Succeed())
+		return r
+	}
+
+	Context("state machine transitions", func() {
+		It("transitions Requested → Confirmed on first reconcile", func() {
+			future := time.Now().UTC().Add(1 * time.Hour)
+			farFuture := future.Add(24 * time.Hour)
+			createReservation("res-confirm", "tenant-a", "h200", "us-east", "Guaranteed", "5000.000000", 4, future, farFuture)
+
+			Eventually(func(g Gomega) {
+				r := fetchReservation("res-confirm")
+				g.Expect(r.Status.State).To(Equal(billingv1alpha1.ReservationStateConfirmed))
+				cond := apimeta.FindStatusCondition(r.Status.Conditions, billingv1alpha1.ConditionCapacityConfirmed)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+				g.Expect(cond.Reason).To(Equal("Passthrough"))
+			}, "10s", "250ms").Should(Succeed())
+		})
+
+		It("transitions Confirmed → Active when window.start is reached", func() {
+			past := time.Now().UTC().Add(-1 * time.Hour)
+			farFuture := time.Now().UTC().Add(24 * time.Hour)
+			createReservation("res-active", "tenant-b", "h200", "us-west", "Preemptible", "2500.000000", 2, past, farFuture)
+
+			Eventually(func(g Gomega) {
+				r := fetchReservation("res-active")
+				g.Expect(r.Status.State).To(Equal(billingv1alpha1.ReservationStateActive))
+			}, "10s", "250ms").Should(Succeed())
+		})
+
+		It("transitions Active → Expired when window.end is reached", func() {
+			past := time.Now().UTC().Add(-2 * time.Hour)
+			recentPast := time.Now().UTC().Add(-1 * time.Hour)
+			createReservation("res-expired", "tenant-c", "h200", "eu-west", "Guaranteed", "8000.000000", 8, past, recentPast)
+
+			Eventually(func(g Gomega) {
+				r := fetchReservation("res-expired")
+				g.Expect(r.Status.State).To(Equal(billingv1alpha1.ReservationStateExpired))
+			}, "10s", "250ms").Should(Succeed())
+		})
+
+		It("sets ObservedGeneration on status", func() {
+			future := time.Now().UTC().Add(1 * time.Hour)
+			farFuture := future.Add(24 * time.Hour)
+			createReservation("res-gen", "tenant-d", "h200", "us-east", "Guaranteed", "5000.000000", 4, future, farFuture)
+
+			Eventually(func(g Gomega) {
+				r := fetchReservation("res-gen")
+				g.Expect(r.Status.State).To(Equal(billingv1alpha1.ReservationStateConfirmed))
+				g.Expect(r.Status.ObservedGeneration).To(Equal(r.Generation))
+			}, "10s", "250ms").Should(Succeed())
+		})
+	})
+
+	Context("Preemptible class", func() {
+		It("follows the same state machine for Preemptible reservations", func() {
+			future := time.Now().UTC().Add(1 * time.Hour)
+			farFuture := future.Add(7 * 24 * time.Hour)
+			createReservation("res-preempt", "tenant-e", "h200-mig-3g.40gb", "us-east", "Preemptible", "1200.000000", 2, future, farFuture)
+
+			Eventually(func(g Gomega) {
+				r := fetchReservation("res-preempt")
+				g.Expect(r.Status.State).To(Equal(billingv1alpha1.ReservationStateConfirmed))
+			}, "10s", "250ms").Should(Succeed())
+		})
+	})
+})

@@ -235,6 +235,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&billingv1alpha1.ReservationValidator{}).SetupWebhookWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create webhook", "webhook", "Reservation")
+		os.Exit(1)
+	}
+
+	if err = (&controller.ReservationReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "Reservation")
+		os.Exit(1)
+	}
+
 	// --- BillingConnector controller (PSP backend bootstrap) ---
 	pspRegistry := controller.NewBackendRegistry()
 	if err = (&controller.BillingConnectorReconciler{

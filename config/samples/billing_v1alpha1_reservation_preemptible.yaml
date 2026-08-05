@@ -1,0 +1,15 @@
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: Reservation
+metadata:
+  name: reservation-preemptible-sample
+  namespace: platform-billing-operator-system
+spec:
+  tenantRef: acme-corp
+  sku: h200-mig-3g.40gb
+  count: 2
+  geo: us-east
+  window:
+    start: "2026-09-01T00:00:00Z"
+    end: "2026-09-07T23:59:59Z"
+  class: Preemptible
+  monthlyPrice: "2400.000000"

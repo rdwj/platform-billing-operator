@@ -58,6 +58,7 @@ rules:
   - billingconsoles
   - budgetpolicies
   - plans
+  - reservations
   - tenantaccounts
   verbs:
   - get
@@ -72,6 +73,7 @@ rules:
   - billingconsoles/status
   - budgetpolicies/status
   - plans/status
+  - reservations/status
   - tenantaccounts/status
   verbs:
   - get
@@ -83,6 +85,7 @@ rules:
   - billingconsoles/finalizers
   - budgetpolicies/finalizers
   - plans/finalizers
+  - reservations/finalizers
   - tenantaccounts/finalizers
   verbs:
   - update

@@ -1,0 +1,15 @@
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: Reservation
+metadata:
+  name: reservation-guaranteed-sample
+  namespace: platform-billing-operator-system
+spec:
+  tenantRef: acme-corp
+  sku: h200
+  count: 4
+  geo: us-east
+  window:
+    start: "2026-09-01T00:00:00Z"
+    end: "2026-09-30T23:59:59Z"
+  class: Guaranteed
+  monthlyPrice: "12000.000000"
