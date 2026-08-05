@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
 	"github.com/shopspring/decimal"
 )
@@ -48,7 +49,7 @@ func (h *balanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Tenant:   tenant,
 		Currency: "USD",
 		Balance:  bal.StringFixed(6),
-		State:    "Active",
+		State:    billingv1alpha1.StateActive,
 		AsOf:     asOf.UTC().Format(time.RFC3339),
 	})
 }

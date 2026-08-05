@@ -146,7 +146,7 @@ func (h *pricingHandler) resolvePriceBook(ctx context.Context, tenant, ns string
 		return nil, err
 	}
 	for i := range pbList.Items {
-		if pbList.Items[i].Status.State == "Active" {
+		if pbList.Items[i].Status.State == billingv1alpha1.StateActive {
 			return &pbList.Items[i], nil
 		}
 	}
