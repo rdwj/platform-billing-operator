@@ -18,8 +18,10 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -35,14 +37,15 @@ import (
 // Requested → Confirmed → Active → Expired.
 type ReservationReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Now    func() time.Time
+	Scheme   *runtime.Scheme
+	Now      func() time.Time
+	GeoLabel string
 }
 
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=reservations,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=reservations/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=reservations/finalizers,verbs=update
-// +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=clusterqueues,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=clusterqueues,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=resourceflavors,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
@@ -66,17 +69,13 @@ func (r *ReservationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 
 	switch res.Status.State {
 	case "", billingv1alpha1.ReservationStateRequested:
-		// Phase 1: passthrough — always confirm.
-		// Phase 2 will add real capacity checks here.
-		res.Status.State = billingv1alpha1.ReservationStateConfirmed
-		apimeta.SetStatusCondition(&res.Status.Conditions, metav1.Condition{
-			Type:               billingv1alpha1.ConditionCapacityConfirmed,
-			Status:             metav1.ConditionTrue,
-			ObservedGeneration: res.Generation,
-			Reason:             "Passthrough",
-			Message:            "Capacity check deferred to Phase 2",
-		})
-		logger.Info("Reservation confirmed (passthrough)", "reservation", res.Name)
+		result, err := r.handleRequested(ctx, &res, now)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+		if result != nil {
+			return *result, nil
+		}
 
 	case billingv1alpha1.ReservationStateConfirmed:
 		if !now.Before(res.Spec.Window.Start.Time) {
@@ -100,9 +99,98 @@ func (r *ReservationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		if err := r.Status().Update(ctx, &res); err != nil {
 			return ctrl.Result{}, err
 		}
+		if err := r.compileAndTrigger(ctx, &res); err != nil {
+			logger.Error(err, "Kueue compilation failed, will retry", "reservation", res.Name)
+			return ctrl.Result{RequeueAfter: requeueCapacityCheck}, nil
+		}
 	}
 
 	return r.requeueResult(&res, now), nil
+}
+
+// handleRequested performs the capacity feasibility check for a Requested
+// reservation. Returns a ctrl.Result pointer if the reconcile should return
+// early (capacity insufficient), or nil if the reservation was confirmed and
+// the caller should continue with the normal state-transition flow.
+func (r *ReservationReconciler) handleRequested(ctx context.Context, res *billingv1alpha1.Reservation, now time.Time) (*ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	var nodeList corev1.NodeList
+	if err := r.List(ctx, &nodeList); err != nil {
+		return nil, fmt.Errorf("listing nodes: %w", err)
+	}
+
+	var allRes billingv1alpha1.ReservationList
+	if err := r.List(ctx, &allRes); err != nil {
+		return nil, fmt.Errorf("listing reservations: %w", err)
+	}
+
+	geoLabel := r.geoLabel()
+	snap := BuildCapacitySnapshot(nodeList.Items, allRes.Items, geoLabel)
+	available := snap.Available(res.Spec.SKU, res.Spec.Geo)
+
+	if available < res.Spec.Count {
+		apimeta.SetStatusCondition(&res.Status.Conditions, metav1.Condition{
+			Type:               billingv1alpha1.ConditionCapacityConfirmed,
+			Status:             metav1.ConditionFalse,
+			ObservedGeneration: res.Generation,
+			Reason:             "CapacityInsufficient",
+			Message:            fmt.Sprintf("Need %d GPUs (%s/%s), only %d available", res.Spec.Count, res.Spec.SKU, res.Spec.Geo, max(available, 0)),
+		})
+		res.Status.CapacityCheck = &billingv1alpha1.CapacityCheckResult{
+			Available: false,
+		}
+		res.Status.State = billingv1alpha1.ReservationStateRequested
+		res.Status.ObservedGeneration = res.Generation
+
+		if err := r.Status().Update(ctx, res); err != nil {
+			return nil, err
+		}
+		logger.Info("Capacity insufficient, requeueing", "reservation", res.Name,
+			"requested", res.Spec.Count, "available", available)
+		result := ctrl.Result{RequeueAfter: requeueCapacityCheck}
+		return &result, nil
+	}
+
+	res.Status.State = billingv1alpha1.ReservationStateConfirmed
+	apimeta.SetStatusCondition(&res.Status.Conditions, metav1.Condition{
+		Type:               billingv1alpha1.ConditionCapacityConfirmed,
+		Status:             metav1.ConditionTrue,
+		ObservedGeneration: res.Generation,
+		Reason:             "CapacityAvailable",
+		Message:            fmt.Sprintf("Capacity confirmed: %d GPUs in %s/%s", res.Spec.Count, res.Spec.SKU, res.Spec.Geo),
+	})
+	res.Status.CapacityCheck = &billingv1alpha1.CapacityCheckResult{
+		Available: true,
+		Pool:      fmt.Sprintf("%s/%s", res.Spec.SKU, res.Spec.Geo),
+	}
+	logger.Info("Reservation confirmed", "reservation", res.Name)
+
+	return nil, nil
+}
+
+// compileAndTrigger runs Kueue CQ compilation and preemption checks after a
+// reservation state transition. Errors are logged but not returned to avoid
+// blocking the state machine.
+func (r *ReservationReconciler) compileAndTrigger(ctx context.Context, res *billingv1alpha1.Reservation) error {
+	if err := compileKueueState(ctx, r.Client, res.Spec.TenantRef); err != nil {
+		return fmt.Errorf("compileKueueState: %w", err)
+	}
+
+	var nodeList corev1.NodeList
+	if err := r.List(ctx, &nodeList); err != nil {
+		return fmt.Errorf("listing nodes: %w", err)
+	}
+	var allRes billingv1alpha1.ReservationList
+	if err := r.List(ctx, &allRes); err != nil {
+		return fmt.Errorf("listing reservations: %w", err)
+	}
+
+	if err := triggerPreemption(ctx, r.Client, nodeList.Items, allRes.Items, r.geoLabel()); err != nil {
+		return fmt.Errorf("triggerPreemption: %w", err)
+	}
+
+	return nil
 }
 
 func (r *ReservationReconciler) now() time.Time {
@@ -110,6 +198,13 @@ func (r *ReservationReconciler) now() time.Time {
 		return r.Now()
 	}
 	return time.Now().UTC()
+}
+
+func (r *ReservationReconciler) geoLabel() string {
+	if r.GeoLabel != "" {
+		return r.GeoLabel
+	}
+	return defaultGeoLabel
 }
 
 // requeueResult computes when to next reconcile based on state and window times.

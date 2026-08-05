@@ -17,12 +17,15 @@ limitations under the License.
 package controller
 
 import (
+	"fmt"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	corev1 "k8s.io/api/core/v1"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -66,8 +69,32 @@ var _ = Describe("Reservation controller", func() {
 		return r
 	}
 
+	ensureGPUNode := func(name, sku, geo string, gpuCount int) {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name,
+				Labels: map[string]string{
+					labelGPUProduct: sku,
+					defaultGeoLabel: geo,
+				},
+			},
+			Status: corev1.NodeStatus{
+				Allocatable: corev1.ResourceList{
+					corev1.ResourceName(gpuResource): resource.MustParse(fmt.Sprintf("%d", gpuCount)),
+				},
+			},
+		}
+		err := k8sClient.Create(ctx, node)
+		if err != nil {
+			// Node already exists (cluster-scoped, shared across tests).
+			return
+		}
+	}
+
 	Context("state machine transitions", func() {
-		It("transitions Requested → Confirmed on first reconcile", func() {
+		It("transitions Requested → Confirmed when capacity is available", func() {
+			ensureGPUNode("gpu-node-confirm-1", "h200", "us-east", 8)
+
 			future := time.Now().UTC().Add(1 * time.Hour)
 			farFuture := future.Add(24 * time.Hour)
 			createReservation("res-confirm", "tenant-a", "h200", "us-east", "Guaranteed", "5000.000000", 4, future, farFuture)
@@ -78,11 +105,49 @@ var _ = Describe("Reservation controller", func() {
 				cond := apimeta.FindStatusCondition(r.Status.Conditions, billingv1alpha1.ConditionCapacityConfirmed)
 				g.Expect(cond).NotTo(BeNil())
 				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(cond.Reason).To(Equal("Passthrough"))
+				g.Expect(cond.Reason).To(Equal("CapacityAvailable"))
+			}, "10s", "250ms").Should(Succeed())
+		})
+
+		It("stays Requested when capacity is insufficient", func() {
+			future := time.Now().UTC().Add(1 * time.Hour)
+			farFuture := future.Add(24 * time.Hour)
+			createReservation("res-no-cap", "tenant-nocap", "v100-rare", "moon-base", "Guaranteed", "5000.000000", 100, future, farFuture)
+
+			// Wait for the controller to set the CapacityInsufficient condition.
+			Eventually(func(g Gomega) {
+				r := fetchReservation("res-no-cap")
+				cond := apimeta.FindStatusCondition(r.Status.Conditions, billingv1alpha1.ConditionCapacityConfirmed)
+				g.Expect(cond).NotTo(BeNil())
+				g.Expect(cond.Reason).To(Equal("CapacityInsufficient"))
+			}, "10s", "250ms").Should(Succeed())
+
+			// Verify it stays Requested and does not transition.
+			Consistently(func(g Gomega) {
+				r := fetchReservation("res-no-cap")
+				g.Expect(r.Status.State).To(Equal(billingv1alpha1.ReservationStateRequested))
+			}, "2s", "500ms").Should(Succeed())
+		})
+
+		It("populates CapacityCheckResult on confirmation", func() {
+			ensureGPUNode("gpu-node-capcheck", "h200", "us-east", 8)
+
+			future := time.Now().UTC().Add(1 * time.Hour)
+			farFuture := future.Add(24 * time.Hour)
+			createReservation("res-capcheck", "tenant-cap", "h200", "us-east", "Guaranteed", "5000.000000", 2, future, farFuture)
+
+			Eventually(func(g Gomega) {
+				r := fetchReservation("res-capcheck")
+				g.Expect(r.Status.State).To(Equal(billingv1alpha1.ReservationStateConfirmed))
+				g.Expect(r.Status.CapacityCheck).NotTo(BeNil())
+				g.Expect(r.Status.CapacityCheck.Available).To(BeTrue())
+				g.Expect(r.Status.CapacityCheck.Pool).To(Equal("h200/us-east"))
 			}, "10s", "250ms").Should(Succeed())
 		})
 
 		It("transitions Confirmed → Active when window.start is reached", func() {
+			ensureGPUNode("gpu-node-active", "h200", "us-west", 8)
+
 			past := time.Now().UTC().Add(-1 * time.Hour)
 			farFuture := time.Now().UTC().Add(24 * time.Hour)
 			createReservation("res-active", "tenant-b", "h200", "us-west", "Preemptible", "2500.000000", 2, past, farFuture)
@@ -94,6 +159,8 @@ var _ = Describe("Reservation controller", func() {
 		})
 
 		It("transitions Active → Expired when window.end is reached", func() {
+			ensureGPUNode("gpu-node-expired", "h200", "eu-west", 16)
+
 			past := time.Now().UTC().Add(-2 * time.Hour)
 			recentPast := time.Now().UTC().Add(-1 * time.Hour)
 			createReservation("res-expired", "tenant-c", "h200", "eu-west", "Guaranteed", "8000.000000", 8, past, recentPast)
@@ -105,6 +172,8 @@ var _ = Describe("Reservation controller", func() {
 		})
 
 		It("sets ObservedGeneration on status", func() {
+			ensureGPUNode("gpu-node-gen", "h200", "us-east", 8)
+
 			future := time.Now().UTC().Add(1 * time.Hour)
 			farFuture := future.Add(24 * time.Hour)
 			createReservation("res-gen", "tenant-d", "h200", "us-east", "Guaranteed", "5000.000000", 4, future, farFuture)
@@ -119,6 +188,8 @@ var _ = Describe("Reservation controller", func() {
 
 	Context("Preemptible class", func() {
 		It("follows the same state machine for Preemptible reservations", func() {
+			ensureGPUNode("gpu-node-preempt", "h200-mig-3g.40gb", "us-east", 4)
+
 			future := time.Now().UTC().Add(1 * time.Hour)
 			farFuture := future.Add(7 * 24 * time.Hour)
 			createReservation("res-preempt", "tenant-e", "h200-mig-3g.40gb", "us-east", "Preemptible", "1200.000000", 2, future, farFuture)

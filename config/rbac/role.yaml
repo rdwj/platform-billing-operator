@@ -136,6 +136,8 @@ rules:
   resources:
   - clusterqueues
   verbs:
+  - create
+  - delete
   - get
   - list
   - patch

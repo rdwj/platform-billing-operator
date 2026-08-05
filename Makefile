@@ -331,6 +331,10 @@ demo-g0: ## Run G0 demo (GPUaaS metering + unified wallet)
 demo-g1: ## Run G1 demo (GPU enforcement via Kueue — Drain/Preempt/unified wallet)
 	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-g1.sh
 
+.PHONY: test-g2-capacity
+test-g2-capacity: ## Run G2 Phase 2 capacity feasibility test (Reservation + Kueue CQ compilation)
+	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/test-g2-capacity.sh
+
 .PHONY: demo-m5
 demo-m5: ## Run M5 demo (Reconciler + Budgets + Exports)
 	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-m5.sh
