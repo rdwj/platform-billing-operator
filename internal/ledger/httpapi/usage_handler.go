@@ -21,6 +21,7 @@ type usageSeriesResponse struct {
 type usagePointResponse struct {
 	Start      string             `json:"start"`
 	SKU        string             `json:"sku"`
+	Geo        string             `json:"geo,omitempty"`
 	Quantities map[string]float64 `json:"quantities"`
 	Charged    string             `json:"charged"`
 	Events     int                `json:"events"`
@@ -33,10 +34,6 @@ func (h *usageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tenant := r.URL.Query().Get("tenant")
-	if tenant == "" {
-		writeError(w, http.StatusBadRequest, "tenant is required")
-		return
-	}
 
 	fromStr := r.URL.Query().Get("from")
 	toStr := r.URL.Query().Get("to")
@@ -68,8 +65,14 @@ func (h *usageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sku := r.URL.Query().Get("sku")
+	groupBy := r.URL.Query().Get("group_by")
 
-	buckets, err := h.store.QueryBucketedUsage(r.Context(), tenant, from, to, bucket, sku)
+	var buckets []ledger.UsageBucket
+	if tenant != "" {
+		buckets, err = h.store.QueryBucketedUsage(r.Context(), tenant, from, to, bucket, sku)
+	} else {
+		buckets, err = h.store.QueryBucketedUsageAll(r.Context(), from, to, bucket, sku, groupBy)
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -81,6 +84,7 @@ func (h *usageHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		points = append(points, usagePointResponse{
 			Start:      b.Start.UTC().Format(time.RFC3339),
 			SKU:        b.SKU,
+			Geo:        b.Geo,
 			Quantities: b.Quantities,
 			Charged:    charged.StringFixed(6),
 			Events:     b.Events,

@@ -26,6 +26,8 @@ func NewServer(ingester *ledger.Ingester, store *ledger.Store, k8sReader client.
 	mux.Handle("/v1/tenants", &tenantsHandler{reader: k8sReader, defaultNS: defaultNS})
 	mux.Handle("/v1/ledger", &ledgerHandler{store: store})
 	mux.Handle("/v1/budgets", &budgetsHandler{reader: k8sReader, defaultNS: defaultNS})
+	mux.Handle("/v1/plans", &plansHandler{reader: k8sReader, defaultNS: defaultNS})
+	mux.Handle("/v1/pricebooks", &pricebooksHandler{reader: k8sReader, defaultNS: defaultNS})
 	mux.Handle("/v1/drift", &driftHandler{store: store})
 	mux.Handle("/v1/drift/latest", &driftHandler{store: store})
 	mux.Handle("/v1/export", &exportHandler{store: store})

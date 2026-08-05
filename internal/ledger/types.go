@@ -80,6 +80,7 @@ type rawSource struct {
 type UsageBucket struct {
 	Start      time.Time          `json:"start"`
 	SKU        string             `json:"sku"`
+	Geo        string             `json:"geo,omitempty"`
 	Quantities map[string]float64 `json:"quantities"`
 	Charged    string             `json:"charged"`
 	Events     int                `json:"events"`

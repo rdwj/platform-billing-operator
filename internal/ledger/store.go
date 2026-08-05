@@ -430,6 +430,94 @@ func (s *Store) QueryBucketedUsage(ctx context.Context, tenantID string, from, t
 	return buckets, nil
 }
 
+// QueryBucketedUsageAll is the cross-tenant variant of QueryBucketedUsage.
+// It aggregates across all tenants (provider-level view). The groupBy
+// parameter adds additional grouping dimensions: "geo" includes ue.geo in
+// the result; any other value (or "") groups by bucket+sku only.
+// NOTE: at production scale, add covering indexes on charges(rated_at) and
+// usage_events(record_id, sku, geo) to keep this query fast.
+func (s *Store) QueryBucketedUsageAll(ctx context.Context, from, to time.Time, bucket, sku, groupBy string) ([]UsageBucket, error) {
+	switch bucket {
+	case "hour", "day", "month":
+	default:
+		return nil, fmt.Errorf("invalid bucket %q: must be hour, day, or month", bucket)
+	}
+
+	args := []any{from, to}
+	skuClause := ""
+	if sku != "" {
+		skuClause = "AND ue.sku = $3"
+		args = append(args, sku)
+	}
+
+	geoSelect := "''"
+	geoGroup := ""
+	if groupBy == "geo" {
+		geoSelect = "COALESCE(ue.geo, '')"
+		geoGroup = ", ue.geo"
+	}
+
+	query := fmt.Sprintf(`
+		WITH charge_agg AS (
+		  SELECT date_trunc('%s', c.rated_at) AS bucket_start,
+		         ue.sku,
+		         %s AS geo,
+		         sum(c.amount) AS charged,
+		         count(*) AS events
+		  FROM charges c
+		  JOIN usage_events ue ON ue.record_id = c.record_id
+		  WHERE c.rated_at >= $1 AND c.rated_at < $2 %s
+		  GROUP BY 1, 2%s
+		),
+		qty_agg AS (
+		  SELECT date_trunc('%s', c.rated_at) AS bucket_start,
+		         ue.sku,
+		         %s AS geo,
+		         kv.key,
+		         sum(kv.value::numeric) AS val
+		  FROM charges c
+		  JOIN usage_events ue ON ue.record_id = c.record_id
+		  CROSS JOIN LATERAL jsonb_each_text(ue.quantities) AS kv(key, value)
+		  WHERE c.rated_at >= $1 AND c.rated_at < $2 %s
+		  GROUP BY 1, 2, 3, 4
+		)
+		SELECT ca.bucket_start, ca.sku, ca.geo, ca.charged, ca.events,
+		       COALESCE(
+		         (SELECT jsonb_object_agg(q.key, q.val)
+		          FROM qty_agg q
+		          WHERE q.bucket_start = ca.bucket_start AND q.sku = ca.sku AND q.geo = ca.geo),
+		         '{}'::jsonb
+		       ) AS quantities
+		FROM charge_agg ca
+		ORDER BY ca.bucket_start, ca.sku`, bucket, geoSelect, skuClause, geoGroup,
+		bucket, geoSelect, skuClause)
+
+	rows, err := s.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query bucketed usage (all tenants): %w", err)
+	}
+	defer rows.Close()
+
+	var buckets []UsageBucket
+	for rows.Next() {
+		var b UsageBucket
+		var geo string
+		var quantitiesJSON []byte
+		if err := rows.Scan(&b.Start, &b.SKU, &geo, &b.Charged, &b.Events, &quantitiesJSON); err != nil {
+			return nil, fmt.Errorf("scan usage bucket: %w", err)
+		}
+		b.Geo = geo
+		b.Quantities = make(map[string]float64)
+		if len(quantitiesJSON) > 0 {
+			if err := json.Unmarshal(quantitiesJSON, &b.Quantities); err != nil {
+				return nil, fmt.Errorf("unmarshal bucket quantities: %w", err)
+			}
+		}
+		buckets = append(buckets, b)
+	}
+	return buckets, nil
+}
+
 // InsertAdjustment creates an adjustment record. If an idempotency_key
 // collision occurs, the existing row is returned if content matches;
 // otherwise ErrIdempotencyConflict is returned.
