@@ -239,7 +239,7 @@ export default function App() {
       <div style={{ height: 56, background: '#151515', display: 'flex', alignItems: 'center', gap: 14, padding: '0 20px', flexShrink: 0 }}>
         <div style={{ width: 26, height: 26, background: '#EE0000', borderRadius: 6, flexShrink: 0 }} />
         <div style={{ color: '#fff', fontFamily: DISPLAY, fontWeight: 700, fontSize: 15 }}>
-          Corvid AI Cloud&nbsp;&nbsp;<span style={{ color: '#8a8d90', fontWeight: 400 }}>MaaS FinOps Console</span>
+          Redwoods University&nbsp;&nbsp;<span style={{ color: '#8a8d90', fontWeight: 400 }}>MaaS FinOps Console</span>
         </div>
         <div style={{ flex: 1 }} />
         <div style={{ display: 'flex', background: '#2b2e33', borderRadius: 16, padding: 3, gap: 2 }}>
