@@ -476,6 +476,89 @@ func (s *Store) InsertAdjustment(ctx context.Context, adj AdjustmentInput) (Adju
 	return row, nil
 }
 
+// ListAdjustments returns recent adjustments for a tenant, ordered by
+// created_at descending. Limit defaults to 50 if not provided or <= 0.
+func (s *Store) ListAdjustments(ctx context.Context, tenantID string, limit int) ([]AdjustmentRow, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT adjustment_id, tenant_id, amount, kind, reason, idempotency_key, created_at
+		FROM adjustments
+		WHERE tenant_id = $1
+		ORDER BY created_at DESC
+		LIMIT $2`, tenantID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list adjustments: %w", err)
+	}
+	defer rows.Close()
+
+	var adjustments []AdjustmentRow
+	for rows.Next() {
+		var row AdjustmentRow
+		var idempKey sql.NullString
+		if err := rows.Scan(&row.ID, &row.TenantID, &row.Amount, &row.Kind,
+			&row.Reason, &idempKey, &row.CreatedAt); err != nil {
+			return nil, fmt.Errorf("scan adjustment row: %w", err)
+		}
+		if idempKey.Valid {
+			row.IdempotencyKey = idempKey.String
+		}
+		adjustments = append(adjustments, row)
+	}
+	return adjustments, rows.Err()
+}
+
+// QueryLedger returns a combined, chronologically-ordered view of charges
+// (as debits) and adjustments for a tenant. The balance_after column is the
+// running sum computed in chronological order; the result set is ordered
+// newest-first and capped at limit (default 50).
+func (s *Store) QueryLedger(ctx context.Context, tenantID string, limit int) ([]LedgerEntry, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := s.pool.Query(ctx, `
+		WITH combined AS (
+			SELECT c.rated_at AS ts, 'charge' AS type,
+			       ue.sku AS description,
+			       -c.amount AS amount, c.record_id AS ref_id
+			FROM charges c
+			JOIN usage_events ue ON ue.record_id = c.record_id
+			WHERE c.tenant_id = $1
+			UNION ALL
+			SELECT a.created_at AS ts, a.kind AS type, a.reason AS description,
+			       a.amount, COALESCE(a.idempotency_key, '') AS ref_id
+			FROM adjustments a WHERE a.tenant_id = $1
+		),
+		ordered AS (
+			SELECT ts, type, description, amount, ref_id,
+			       SUM(amount) OVER (ORDER BY ts ASC) AS balance_after
+			FROM combined
+		)
+		SELECT ts, type, description, amount, ref_id, balance_after
+		FROM ordered ORDER BY ts DESC LIMIT $2`, tenantID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("query ledger: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []LedgerEntry
+	for rows.Next() {
+		var e LedgerEntry
+		var amount, balanceAfter string
+		if err := rows.Scan(&e.Timestamp, &e.Type, &e.Description,
+			&amount, &e.RefID, &balanceAfter); err != nil {
+			return nil, fmt.Errorf("scan ledger entry: %w", err)
+		}
+		amt, _ := decimal.NewFromString(amount)
+		bal, _ := decimal.NewFromString(balanceAfter)
+		e.Amount = amt.StringFixed(6)
+		e.BalanceAfter = bal.StringFixed(6)
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
 // QueryAdjustmentTotal returns the sum of adjustment amounts for a tenant
 // filtered by kind and time range. Returns "0" if no rows match.
 func (s *Store) QueryAdjustmentTotal(ctx context.Context, tenantID, kind string, since time.Time) (string, error) {

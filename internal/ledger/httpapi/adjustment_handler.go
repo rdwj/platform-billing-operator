@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/rdwj/platform-billing-operator/internal/ledger"
@@ -28,16 +29,70 @@ type adjustmentResponse struct {
 	Amount         string `json:"amount"`
 	Kind           string `json:"kind"`
 	Reason         string `json:"reason"`
-	IdempotencyKey string `json:"idempotency_key"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	CreatedAt      string `json:"created_at"`
 }
 
+type listAdjustmentsResponse struct {
+	Tenant      string               `json:"tenant"`
+	Adjustments []adjustmentResponse `json:"adjustments"`
+}
+
 func (h *adjustmentHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
+	switch r.Method {
+	case http.MethodGet:
+		h.handleGet(w, r)
+	case http.MethodPost:
+		h.handlePost(w, r)
+	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (h *adjustmentHandler) handleGet(w http.ResponseWriter, r *http.Request) {
+	tenant := r.URL.Query().Get("tenant")
+	if tenant == "" {
+		writeError(w, http.StatusBadRequest, "tenant is required")
 		return
 	}
 
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+
+	rows, err := h.store.ListAdjustments(r.Context(), tenant, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	adjustments := make([]adjustmentResponse, 0, len(rows))
+	for _, row := range rows {
+		amt, _ := decimal.NewFromString(row.Amount)
+		resp := adjustmentResponse{
+			ID:        row.ID,
+			Tenant:    row.TenantID,
+			Amount:    amt.StringFixed(6),
+			Kind:      row.Kind,
+			Reason:    row.Reason,
+			CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339),
+		}
+		if row.IdempotencyKey != "" {
+			resp.IdempotencyKey = row.IdempotencyKey
+		}
+		adjustments = append(adjustments, resp)
+	}
+
+	writeJSON(w, http.StatusOK, listAdjustmentsResponse{
+		Tenant:      tenant,
+		Adjustments: adjustments,
+	})
+}
+
+func (h *adjustmentHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 	var req adjustmentRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")

@@ -104,6 +104,18 @@ type AdjustmentRow struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+// LedgerEntry is a combined view of charges and adjustments for the tenant
+// activity ledger. Charges appear as negative amounts; adjustments retain
+// their original sign. BalanceAfter is the running sum computed chronologically.
+type LedgerEntry struct {
+	Timestamp    time.Time `json:"timestamp"`
+	Type         string    `json:"type"`
+	Description  string    `json:"description"`
+	Amount       string    `json:"amount"`
+	BalanceAfter string    `json:"balance_after"`
+	RefID        string    `json:"ref_id"`
+}
+
 type DriftReport struct {
 	ID           int64     `json:"id"`
 	TenantID     string    `json:"tenant_id"`
