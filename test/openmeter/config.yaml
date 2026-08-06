@@ -1,0 +1,62 @@
+# OpenMeter configuration for platform-billing-operator integration tests.
+#
+# Defines three inference meters matching the operator's MeterDefinition specs:
+#   - inference_prompt_tokens     (SUM of $.prompt_tokens, grouped by model)
+#   - inference_completion_tokens (SUM of $.completion_tokens, grouped by model)
+#   - inference_request_count     (COUNT of inference events, grouped by model)
+
+ingest:
+  kafka:
+    broker: kafka:9092
+    brokerAddressFamily: v4
+    socketKeepAliveEnable: true
+    topicMetadataRefreshInterval: 10s
+
+aggregation:
+  clickhouse:
+    address: clickhouse:9000
+
+sink:
+  minCommitCount: 1
+  namespaceRefetch: 1s
+  namespaceRefetchTimeout: 1s
+  kafka:
+    brokers: kafka:9092
+    brokerAddressFamily: v4
+    socketKeepAliveEnable: true
+    topicMetadataRefreshInterval: 10s
+  dedupe:
+    enabled: true
+    driver: redis
+    config:
+      address: redis:6379
+      database: 0
+      expiration: 768h
+
+postgres:
+  url: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
+  autoMigrate: migration
+
+meters:
+  - slug: inference_prompt_tokens
+    description: Total prompt tokens consumed per inference request
+    eventType: inference
+    aggregation: SUM
+    valueProperty: $.prompt_tokens
+    groupBy:
+      model: $.model
+
+  - slug: inference_completion_tokens
+    description: Total completion tokens produced per inference request
+    eventType: inference
+    aggregation: SUM
+    valueProperty: $.completion_tokens
+    groupBy:
+      model: $.model
+
+  - slug: inference_request_count
+    description: Count of inference requests
+    eventType: inference
+    aggregation: COUNT
+    groupBy:
+      model: $.model

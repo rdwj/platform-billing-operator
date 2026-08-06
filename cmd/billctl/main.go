@@ -23,6 +23,7 @@ func main() {
 	rootCmd.AddCommand(adjustCmd())
 	rootCmd.AddCommand(keysCmd())
 	rootCmd.AddCommand(pspCmd())
+	rootCmd.AddCommand(sinkCmd())
 	rootCmd.AddCommand(budgetCmd())
 	rootCmd.AddCommand(driftCmd())
 	rootCmd.AddCommand(dlqCmd())
