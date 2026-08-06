@@ -188,7 +188,7 @@ spec:
                       type: string
                     unit:
                       description: Unit is the pricing unit (e.g. "per-1M-tokens",
-                        "per-gpu-hour").
+                        "per-gpu-second").
                       type: string
                   required:
                   - rates
