@@ -35,6 +35,8 @@ import (
 
 // ReservationReconciler manages the Reservation state machine:
 // Requested → Confirmed → Active → Expired.
+// Active (or Confirmed) → Cancelled is an out-of-band terminal transition
+// triggered by the HTTP cancel handler; the controller treats it as terminal.
 type ReservationReconciler struct {
 	client.Client
 	Scheme   *runtime.Scheme
@@ -89,7 +91,7 @@ func (r *ReservationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			logger.Info("Reservation expired", "reservation", res.Name)
 		}
 
-	case billingv1alpha1.ReservationStateExpired:
+	case billingv1alpha1.ReservationStateExpired, billingv1alpha1.ReservationStateCancelled:
 		return ctrl.Result{}, nil
 	}
 

@@ -472,6 +472,127 @@ func TestComputePeriodCharge_FebruaryLeapYear(t *testing.T) {
 	}
 }
 
+func TestIsChargeable_CancelledState(t *testing.T) {
+	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	res := makeReservation("res-cancelled", "acme", "h200", 4, "Guaranteed", "Cancelled",
+		time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 8, 31, 23, 59, 59, 0, time.UTC),
+		"12000.000000")
+
+	if !isChargeable(res, now) {
+		t.Error("Cancelled Guaranteed reservation must be chargeable so computePeriodCharge can pro-rate the cancellation month")
+	}
+}
+
+func TestComputePeriodCharge_MidMonthCancellation(t *testing.T) {
+	// Reservation window: Jan 1 to Mar 31, cancelled Jan 15 00:00:00.
+	// Period: January (31 days). Billable: Jan 1-14 = 14 days.
+	// Charge: 100 × 2 × 14/31 = 90.322581 (rounded to 6 places).
+	cancelledAt := metav1.NewTime(time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC))
+	res := makeReservation("res-cancel-mid", "acme", "h200", 2, "Guaranteed", "Cancelled",
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 3, 31, 23, 59, 59, 0, time.UTC),
+		"100.000000")
+	res.Status.CancelledAt = &cancelledAt
+
+	periodRef := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) // January
+	amount, comp, err := computePeriodCharge(res, periodRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := "90.322581"
+	if amount.StringFixed(moneyPlaces) != want {
+		t.Errorf("amount = %s, want %s", amount.StringFixed(moneyPlaces), want)
+	}
+	if comp.DaysInPeriod != 14 {
+		t.Errorf("daysInPeriod = %d, want 14", comp.DaysInPeriod)
+	}
+	if comp.DaysInMonth != 31 {
+		t.Errorf("daysInMonth = %d, want 31", comp.DaysInMonth)
+	}
+}
+
+func TestComputePeriodCharge_CancellationAfterPeriod(t *testing.T) {
+	// Cancelled in March, period is January — no clamping, full January charge.
+	cancelledAt := metav1.NewTime(time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC))
+	res := makeReservation("res-cancel-later", "acme", "h200", 2, "Guaranteed", "Cancelled",
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 30, 23, 59, 59, 0, time.UTC),
+		"100.000000")
+	res.Status.CancelledAt = &cancelledAt
+
+	periodRef := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC) // January
+	amount, _, err := computePeriodCharge(res, periodRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Full January: 100 × 2 × 31/31 = 200.000000
+	want := "200.000000"
+	if amount.StringFixed(moneyPlaces) != want {
+		t.Errorf("amount = %s, want %s", amount.StringFixed(moneyPlaces), want)
+	}
+}
+
+func TestComputePeriodCharge_CancellationBeforePeriod(t *testing.T) {
+	// Cancelled in January, period is February — periodEnd before periodStart → zero.
+	cancelledAt := metav1.NewTime(time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC))
+	res := makeReservation("res-cancel-before", "acme", "h200", 2, "Guaranteed", "Cancelled",
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 30, 23, 59, 59, 0, time.UTC),
+		"100.000000")
+	res.Status.CancelledAt = &cancelledAt
+
+	periodRef := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC) // February
+	amount, _, err := computePeriodCharge(res, periodRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !amount.IsZero() {
+		t.Errorf("expected zero charge for period after cancellation, got %s", amount.StringFixed(moneyPlaces))
+	}
+}
+
+func TestTick_CancelledReservation_SkipsPeriodsAfterCancellation(t *testing.T) {
+	// Reservation window: Jan 1 to Jun 30. Cancelled mid-February (Feb 15).
+	// Now is April: billing periods Jan, Feb, Mar, Apr would be generated.
+	// Jan: full charge (before cancellation). Feb: pro-rata 14/28 days.
+	// Mar, Apr: zero (after cancellation), skipped.
+	now := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+	cancelledAt := metav1.NewTime(time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC))
+	res := makeReservation("res-cancel-skip", "acme", "h200", 1, "Guaranteed", "Cancelled",
+		time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 30, 23, 59, 59, 0, time.UTC),
+		"2800.000000")
+	res.Status.CancelledAt = &cancelledAt
+
+	k8s := fakeclient.NewClientBuilder().WithScheme(newScheme(t)).WithObjects(res).Build()
+	store := &fakeStore{}
+	job := New(k8s, store, "platform-billing-operator-system", slog.Default())
+	job.SetNow(func() time.Time { return now })
+
+	count, err := job.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick() error: %v", err)
+	}
+	// Only Jan (full) and Feb (partial) should produce non-zero charges.
+	if count != 2 {
+		t.Fatalf("expected 2 charges (Jan full + Feb partial), got %d", count)
+	}
+
+	// Jan: full month, 2800 × 1 × 31/31 = 2800.000000
+	if store.charges[0].Amount != "2800.000000" {
+		t.Errorf("Jan amount = %q, want 2800.000000", store.charges[0].Amount)
+	}
+	// Feb 2026 has 28 days. Cancelled Feb 15: billable = 14 days.
+	// 2800 × 1 × 14/28 = 1400.000000
+	if store.charges[1].Amount != "1400.000000" {
+		t.Errorf("Feb amount = %q, want 1400.000000", store.charges[1].Amount)
+	}
+}
+
 func TestPeriodKey(t *testing.T) {
 	tests := []struct {
 		t    time.Time

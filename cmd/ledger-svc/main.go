@@ -72,16 +72,16 @@ func main() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(billingv1alpha1.AddToScheme(scheme))
 
-	var k8sReader client.Reader
+	var k8sClient client.Client
 	cfg, err := ctrl.GetConfig()
 	if err != nil {
-		log.Printf("WARNING: no kubeconfig available, /v1/pricing will return 503: %v", err)
+		log.Printf("WARNING: no kubeconfig available, CR-backed endpoints will return 503: %v", err)
 	} else {
-		k8sClient, clientErr := client.New(cfg, client.Options{Scheme: scheme})
+		c, clientErr := client.New(cfg, client.Options{Scheme: scheme})
 		if clientErr != nil {
-			log.Printf("WARNING: failed to create K8s client, /v1/pricing will return 503: %v", clientErr)
+			log.Printf("WARNING: failed to create K8s client, CR-backed endpoints will return 503: %v", clientErr)
 		} else {
-			k8sReader = k8sClient
+			k8sClient = c
 		}
 	}
 
@@ -91,7 +91,7 @@ func main() {
 	}
 
 	// HTTP server (convenience endpoint for WASM capture filter)
-	httpHandler := httpapi.NewServer(ingester, store, k8sReader, billingNS)
+	httpHandler := httpapi.NewServer(ingester, store, k8sClient, billingNS)
 	httpSrv := &http.Server{
 		Addr:    listenHTTP,
 		Handler: httpHandler,

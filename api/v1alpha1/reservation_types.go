@@ -25,6 +25,7 @@ const (
 	ReservationStateConfirmed = "Confirmed"
 	ReservationStateActive    = "Active"
 	ReservationStateExpired   = "Expired"
+	ReservationStateCancelled = "Cancelled"
 
 	ReservationClassGuaranteed  = "Guaranteed"
 	ReservationClassPreemptible = "Preemptible"
@@ -94,9 +95,13 @@ type ReservationSpec struct {
 // ReservationStatus defines the observed state of a Reservation.
 type ReservationStatus struct {
 	// State is the current lifecycle state of this Reservation.
-	// +kubebuilder:validation:Enum=Requested;Confirmed;Active;Expired
+	// +kubebuilder:validation:Enum=Requested;Confirmed;Active;Expired;Cancelled
 	// +optional
 	State string `json:"state,omitempty"`
+
+	// CancelledAt records when the reservation was cancelled.
+	// +optional
+	CancelledAt *metav1.Time `json:"cancelledAt,omitempty"`
 
 	// CapacityCheck records the result of the most recent capacity feasibility check.
 	// +optional

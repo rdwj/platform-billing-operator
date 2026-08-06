@@ -148,12 +148,13 @@ func TestBuildCapacitySnapshot_OnlyActiveConfirmedCounted(t *testing.T) {
 		fakeReservation("res-active", "t2", "h200", "us-east", "Guaranteed", billingv1alpha1.ReservationStateActive, 1),
 		fakeReservation("res-requested", "t3", "h200", "us-east", "Guaranteed", billingv1alpha1.ReservationStateRequested, 10),
 		fakeReservation("res-expired", "t4", "h200", "us-east", "Guaranteed", billingv1alpha1.ReservationStateExpired, 10),
+		fakeReservation("res-cancelled", "t5", "h200", "us-east", "Guaranteed", billingv1alpha1.ReservationStateCancelled, 10),
 	}
 
 	snap := BuildCapacitySnapshot(nodes, reservations, "")
 
 	// Only Confirmed (2) + Active (1) = 3 should be reserved.
-	// Requested (10) and Expired (10) must not count.
+	// Requested (10), Expired (10), and Cancelled (10) must not count.
 	if got := snap.Available("h200", "us-east"); got != 5 {
 		t.Errorf("Available(h200, us-east) = %d, want 5 (8 - 3 counted)", got)
 	}

@@ -186,6 +186,38 @@ var _ = Describe("Reservation controller", func() {
 		})
 	})
 
+	Context("Cancelled state", func() {
+		It("treats Cancelled as a terminal state (no further transitions)", func() {
+			ensureGPUNode("gpu-node-cancel", "h200", "us-east", 8)
+
+			// Create a reservation with window in the past so the controller
+			// would normally drive it through to Active then Expired.
+			past := time.Now().UTC().Add(-2 * time.Hour)
+			recentPast := time.Now().UTC().Add(-1 * time.Hour)
+			createReservation("res-cancel", "tenant-cancel", "h200", "us-east", "Guaranteed", "5000.000000", 2, past, recentPast)
+
+			// Wait for the controller to process it (it will reach Expired).
+			Eventually(func(g Gomega) {
+				r := fetchReservation("res-cancel")
+				g.Expect(r.Status.State).To(Equal(billingv1alpha1.ReservationStateExpired))
+			}, "10s", "250ms").Should(Succeed())
+
+			// Simulate an out-of-band cancel by patching status directly.
+			r := fetchReservation("res-cancel")
+			cancelledAt := metav1.Now()
+			r.Status.State = billingv1alpha1.ReservationStateCancelled
+			r.Status.CancelledAt = &cancelledAt
+			Expect(k8sClient.Status().Update(ctx, &r)).To(Succeed())
+
+			// Verify the controller does not override Cancelled.
+			Consistently(func(g Gomega) {
+				r := fetchReservation("res-cancel")
+				g.Expect(r.Status.State).To(Equal(billingv1alpha1.ReservationStateCancelled))
+				g.Expect(r.Status.CancelledAt).NotTo(BeNil())
+			}, "3s", "500ms").Should(Succeed())
+		})
+	})
+
 	Context("Preemptible class", func() {
 		It("follows the same state machine for Preemptible reservations", func() {
 			ensureGPUNode("gpu-node-preempt", "h200-mig-3g.40gb", "us-east", 4)

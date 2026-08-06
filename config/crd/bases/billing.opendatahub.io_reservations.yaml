@@ -115,6 +115,10 @@ spec:
           status:
             description: ReservationStatus defines the observed state of a Reservation.
             properties:
+              cancelledAt:
+                description: CancelledAt records when the reservation was cancelled.
+                format: date-time
+                type: string
               capacityCheck:
                 description: CapacityCheck records the result of the most recent capacity
                   feasibility check.
@@ -203,6 +207,7 @@ spec:
                 - Confirmed
                 - Active
                 - Expired
+                - Cancelled
                 type: string
             type: object
         type: object

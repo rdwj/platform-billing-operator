@@ -161,7 +161,10 @@ func isChargeable(res *billingv1alpha1.Reservation, now time.Time) bool {
 		return false
 	}
 	switch res.Status.State {
-	case billingv1alpha1.ReservationStateConfirmed, billingv1alpha1.ReservationStateActive:
+	case billingv1alpha1.ReservationStateConfirmed, billingv1alpha1.ReservationStateActive,
+		billingv1alpha1.ReservationStateCancelled:
+		// Cancelled reservations are still chargeable so computePeriodCharge
+		// can pro-rate the cancellation month via the CancelledAt clamp.
 		return true
 	default:
 		return false
@@ -193,6 +196,15 @@ func computePeriodCharge(res *billingv1alpha1.Reservation, periodRef time.Time) 
 	periodEnd := monthEnd
 	if winEnd.Before(monthEnd) {
 		periodEnd = winEnd
+	}
+
+	// Pro-rate for cancellation: clamp periodEnd to the cancellation
+	// timestamp so we only charge for days before cancellation.
+	if res.Status.CancelledAt != nil {
+		cancelledAt := res.Status.CancelledAt.Time.UTC()
+		if cancelledAt.Before(periodEnd) {
+			periodEnd = cancelledAt
+		}
 	}
 
 	daysInPeriod := calendarDays(periodStart, periodEnd)
