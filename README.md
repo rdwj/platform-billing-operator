@@ -22,7 +22,7 @@ make demo-m0
 
 ```bash
 operator-sdk olm install
-operator-sdk run bundle quay.io/rdwj/platform-billing-operator-bundle:v0.0.1
+operator-sdk run bundle quay.io/wjackson/platform-billing-operator-bundle:v0.0.1
 ```
 
 ## CRDs

@@ -29,7 +29,7 @@ metadata:
           },
           "spec": {
             "enabled": true,
-            "image": "controller:latest",
+            "image": "quay.io/wjackson/platform-billing-console:v0.0.1",
             "replicas": 1,
             "route": {
               "host": ""
@@ -290,6 +290,11 @@ metadata:
     createdAt: "2026-08-06T16:50:09Z"
     operators.operatorframework.io/builder: operator-sdk-v1.42.3
     operators.operatorframework.io/project_layout: go.kubebuilder.io/v4
+    categories: "AI/Machine Learning"
+    containerImage: quay.io/wjackson/platform-billing-operator:v0.0.1
+    support: Wes Jackson
+    repository: https://github.com/rdwj/platform-billing-operator
+    description: Billing, metering, and FinOps for AI inference services on OpenShift with Kuadrant enforcement.
   name: platform-billing-operator.v0.0.1
   namespace: placeholder
 spec:
@@ -351,13 +356,41 @@ spec:
       name: tenantaccounts.billing.opendatahub.io
       version: v1alpha1
   description: |
-    Compiles billing Plans into Kuadrant enforcement policies
-    (TokenRateLimitPolicy, RateLimitPolicy, AuthPolicy) on a Gateway API
-    gateway. Part of the billing and metering layer for OpenShift AI.
+    # Platform Billing Operator
+
+    A Kubernetes operator that adds billing, metering, and FinOps capabilities to
+    AI inference services running on OpenShift. It compiles declarative billing
+    Plans into [Kuadrant](https://kuadrant.io) enforcement policies
+    (TokenRateLimitPolicy, RateLimitPolicy, AuthPolicy) on a Gateway API gateway.
+
+    ## Features
+
+    - **Prepaid wallets** with automatic reload, grace periods, and balance tracking
+    - **Usage metering** via a WASM stream-sniffing capture filter on the Envoy data plane
+    - **Multi-product billing** across Models-as-a-Service (token-based) and GPU-as-a-Service (time-based)
+    - **PriceBook management** with SKU-level rates, volume discounts, and committed-use tiers
+    - **Budget policies** with configurable thresholds (Notify, Throttle, Freeze)
+    - **Payment processor integration** (Stripe) with extensible connector model
+    - **GPU reservations** with Guaranteed and Preemptible capacity classes via Kueue
+    - **Billing console** with RBAC-driven Provider and Consumer personas
+    - **CLI** (`billctl`) for wallet adjustments, invoice generation, and DLQ management
+
+    ## Prerequisites
+
+    - OpenShift 4.14+ or Kubernetes 1.27+
+    - [Kuadrant](https://kuadrant.io) (Connectivity Link) 1.4.2+ with Gateway API
+    - A Gateway API `Gateway` resource for your inference endpoints
+
+    ## Quick Start
+
+    Install via OLM, then create a PriceBook, Plan, and TenantAccount to start
+    metering and billing inference traffic. See the
+    [Getting Started guide](https://github.com/rdwj/platform-billing-operator/blob/main/docs/getting-started.md)
+    for a full walkthrough.
   displayName: Platform Billing Operator
   icon:
-  - base64data: ""
-    mediatype: ""
+  - base64data: "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCA4MCA0MCI+CiAgPCEtLSBCYWNrZ3JvdW5kIHJvdW5kZWQgcmVjdGFuZ2xlIC0tPgogIDxyZWN0IHg9IjEiIHk9IjEiIHdpZHRoPSI3OCIgaGVpZ2h0PSIzOCIgcng9IjYiIHJ5PSI2IiBmaWxsPSIjMDA2NkNDIiBvcGFjaXR5PSIwLjEyIi8+CiAgPHJlY3QgeD0iMSIgeT0iMSIgd2lkdGg9Ijc4IiBoZWlnaHQ9IjM4IiByeD0iNiIgcnk9IjYiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwNjZDQyIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KCiAgPCEtLSBNZXRlciBnYXVnZSBhcmMgKGxlZnQgc2lkZSkgLS0+CiAgPHBhdGggZD0iTSAxNCAyOCBBIDEyIDEyIDAgMCAxIDM4IDI4IiBmaWxsPSJub25lIiBzdHJva2U9IiMwMDY2Q0MiIHN0cm9rZS13aWR0aD0iMi41IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICA8IS0tIEdhdWdlIHRpY2sgbWFya3MgLS0+CiAgPGxpbmUgeDE9IjE2IiB5MT0iMjIiIHgyPSIxOCIgeTI9IjI0IiBzdHJva2U9IiMwMDY2Q0MiIHN0cm9rZS13aWR0aD0iMS41IiBzdHJva2UtbGluZWNhcD0icm91bmQiLz4KICA8bGluZSB4MT0iMjIiIHkxPSIxNyIgeDI9IjIzIiB5Mj0iMTkuNSIgc3Ryb2tlPSIjMDA2NkNDIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGxpbmUgeDE9IjMwIiB5MT0iMTciIHgyPSIyOSIgeTI9IjE5LjUiIHN0cm9rZT0iIzAwNjZDQyIgc3Ryb2tlLXdpZHRoPSIxLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIvPgogIDxsaW5lIHgxPSIzNiIgeTE9IjIyIiB4Mj0iMzQiIHkyPSIyNCIgc3Ryb2tlPSIjMDA2NkNDIiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPCEtLSBHYXVnZSBuZWVkbGUgLS0+CiAgPGxpbmUgeDE9IjI2IiB5MT0iMjciIHgyPSIzMiIgeTI9IjE5IiBzdHJva2U9IiMwMEFBRkYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+CiAgPGNpcmNsZSBjeD0iMjYiIGN5PSIyNyIgcj0iMiIgZmlsbD0iIzAwQUFGRiIvPgoKICA8IS0tIENvbm5lY3RpbmcgZGF0YS1mbG93IGRvdHMgLS0+CiAgPGNpcmNsZSBjeD0iNDMiIGN5PSIyMCIgcj0iMS41IiBmaWxsPSIjMDA2NkNDIi8+CiAgPGNpcmNsZSBjeD0iNDgiIGN5PSIyMCIgcj0iMSIgZmlsbD0iIzAwNjZDQyIgb3BhY2l0eT0iMC42Ii8+CiAgPGNpcmNsZSBjeD0iNTIiIGN5PSIyMCIgcj0iMS41IiBmaWxsPSIjMDA2NkNDIi8+CgogIDwhLS0gQ3VycmVuY3kgc3ltYm9sIChyaWdodCBzaWRlKSAtIGNsZWFuZXIgJCBzaWduIC0tPgogIDwhLS0gVG9wIGN1cnZlIG9mIFMgLS0+CiAgPHBhdGggZD0iTSA2NiAxNCBDIDY2IDE0LCA2MiAxMSwgNTggMTQgQyA1NSAxNiwgNTggMTksIDYyIDIwIgogICAgICAgIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwNjZDQyIgc3Ryb2tlLXdpZHRoPSIyLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDwhLS0gQm90dG9tIGN1cnZlIG9mIFMgLS0+CiAgPHBhdGggZD0iTSA2MiAyMCBDIDY2IDIxLCA2OSAyNCwgNjYgMjcgQyA2MyAyOSwgNTggMjcsIDU4IDI3IgogICAgICAgIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzAwNjZDQyIgc3Ryb2tlLXdpZHRoPSIyLjUiIHN0cm9rZS1saW5lY2FwPSJyb3VuZCIgc3Ryb2tlLWxpbmVqb2luPSJyb3VuZCIvPgogIDwhLS0gVmVydGljYWwgYmFyIHRocm91Z2ggJCAtLT4KICA8bGluZSB4MT0iNjIiIHkxPSI5IiB4Mj0iNjIiIHkyPSIzMSIgc3Ryb2tlPSIjMDBBQUZGIiBzdHJva2Utd2lkdGg9IjEuOCIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIi8+Cjwvc3ZnPgo="
+    mediatype: "image/svg+xml"
   install:
     spec:
       clusterPermissions:
@@ -577,7 +610,7 @@ spec:
                 - --health-probe-bind-address=:8081
                 command:
                 - /manager
-                image: quay.io/rdwj/platform-billing-operator:v0.0.1
+                image: quay.io/wjackson/platform-billing-operator:v0.0.1
                 livenessProbe:
                   httpGet:
                     path: /healthz
@@ -657,10 +690,32 @@ spec:
     type: MultiNamespace
   - supported: true
     type: AllNamespaces
+  keywords:
+  - billing
+  - metering
+  - finops
+  - openshift-ai
+  - kuadrant
+  - usage
+  - prepaid
+  - wallet
+  links:
+  - name: GitHub
+    url: https://github.com/rdwj/platform-billing-operator
+  - name: Documentation
+    url: https://github.com/rdwj/platform-billing-operator/tree/main/docs
+  maintainers:
+  - name: Wes Jackson
+    email: wjackson@redhat.com
   maturity: alpha
   minKubeVersion: 1.27.0
   provider:
     name: Open Data Hub
+  relatedImages:
+  - image: quay.io/wjackson/platform-billing-operator:v0.0.1
+    name: manager
+  - image: quay.io/wjackson/platform-billing-console:v0.0.1
+    name: console
   version: 0.0.1
   webhookdefinitions:
   - admissionReviewVersions:

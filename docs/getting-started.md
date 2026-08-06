@@ -17,7 +17,7 @@ The platform-billing-operator compiles high-level billing intent (Plans and Pric
 operator-sdk olm install
 
 # Deploy the operator from the published bundle.
-operator-sdk run bundle quay.io/rdwj/platform-billing-operator-bundle:v0.0.1
+operator-sdk run bundle quay.io/wjackson/platform-billing-operator-bundle:v0.0.1
 ```
 
 ## Install via kustomize (development)
