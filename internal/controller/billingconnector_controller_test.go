@@ -75,7 +75,7 @@ var _ = Describe("BillingConnector Controller", func() {
 				cond := apimeta.FindStatusCondition(fetched.Status.Conditions, billingv1alpha1.ConditionCredentialsValid)
 				g.Expect(cond).NotTo(BeNil(), "CredentialsValid condition should exist")
 				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(cond.Reason).To(Equal("Valid"))
+				g.Expect(cond.Reason).To(Equal(billingv1alpha1.ReasonValid))
 				g.Expect(fetched.Status.ObservedGeneration).To(Equal(fetched.Generation))
 			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
 
@@ -252,7 +252,7 @@ var _ = Describe("BillingConnector Controller", func() {
 				cond := apimeta.FindStatusCondition(fetched.Status.Conditions, billingv1alpha1.ConditionCredentialsValid)
 				g.Expect(cond).NotTo(BeNil(), "CredentialsValid condition should exist")
 				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(cond.Reason).To(Equal("Valid"))
+				g.Expect(cond.Reason).To(Equal(billingv1alpha1.ReasonValid))
 				g.Expect(fetched.Status.ObservedGeneration).To(Equal(fetched.Generation))
 			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
 

@@ -257,12 +257,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// --- BillingConnector controller (PSP backend bootstrap) ---
+	// --- BillingConnector controller (PSP + usage sink backend bootstrap) ---
 	pspRegistry := controller.NewBackendRegistry()
+	sinkRegistry := controller.NewSinkRegistry()
 	if err = (&controller.BillingConnectorReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Registry: pspRegistry,
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		Registry:     pspRegistry,
+		SinkRegistry: sinkRegistry,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "BillingConnector")
 		os.Exit(1)

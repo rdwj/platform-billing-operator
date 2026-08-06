@@ -26,8 +26,11 @@ const (
 	ConditionWebhookReachable = "WebhookReachable"
 	ConditionSyncHealthy      = "SyncHealthy"
 
-	ConnectorTypeStripe  = "stripe"
-	ConnectorTypeWebhook = "webhook"
+	ReasonValid = "Valid"
+
+	ConnectorTypeStripe    = "stripe"
+	ConnectorTypeWebhook   = "webhook"
+	ConnectorTypeOpenMeter = "openmeter"
 )
 
 // WebhookIngressConfig defines how the PSP reaches our webhook endpoint.
@@ -82,11 +85,57 @@ type WebhookStatsStatus struct {
 	SignatureFailures int64 `json:"signatureFailures,omitempty"`
 }
 
+// MeterConfig defines a meter to auto-configure in the external platform.
+type MeterConfig struct {
+	// Slug is the unique identifier for this meter.
+	// +kubebuilder:validation:Required
+	Slug string `json:"slug"`
+
+	// EventType selects which usage events feed this meter.
+	// +kubebuilder:validation:Required
+	EventType string `json:"eventType"`
+
+	// Aggregation is the aggregation function (SUM, COUNT, etc.).
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=SUM;COUNT;AVG;MIN;MAX;UNIQUE_COUNT
+	Aggregation string `json:"aggregation"`
+
+	// ValueProperty is the JSONPath into event data for the aggregated value.
+	// +kubebuilder:validation:Required
+	ValueProperty string `json:"valueProperty"`
+
+	// GroupBy maps label names to JSONPath expressions for grouping.
+	// +optional
+	GroupBy map[string]string `json:"groupBy,omitempty"`
+}
+
+// UsageSinkConfig defines configuration for usage-sink connectors (openmeter, etc.).
+type UsageSinkConfig struct {
+	// Endpoint is the base URL of the external metering platform.
+	// +kubebuilder:validation:Required
+	Endpoint string `json:"endpoint"`
+
+	// BatchSize is the maximum number of events per ingestion request.
+	// +optional
+	// +kubebuilder:default=100
+	BatchSize int `json:"batchSize,omitempty"`
+
+	// FlushInterval is the maximum time between ingestion flushes.
+	// +optional
+	// +kubebuilder:default="5s"
+	FlushInterval string `json:"flushInterval,omitempty"`
+
+	// Meters lists meter definitions to auto-configure on reconcile.
+	// +optional
+	Meters []MeterConfig `json:"meters,omitempty"`
+}
+
 // BillingConnectorSpec defines the desired state of a BillingConnector.
 type BillingConnectorSpec struct {
-	// Type is the payment service provider type.
+	// Type is the connector type: a payment service provider (stripe, webhook)
+	// or a usage metering sink (openmeter).
 	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:Enum=stripe;webhook
+	// +kubebuilder:validation:Enum=stripe;webhook;openmeter
 	Type string `json:"type"`
 
 	// CredentialsSecretRef references a Secret containing PSP credentials.
@@ -109,6 +158,11 @@ type BillingConnectorSpec struct {
 	// +kubebuilder:validation:Enum=psp;none
 	// +kubebuilder:default="none"
 	TaxMode string `json:"taxMode,omitempty"`
+
+	// UsageSink configures usage-sink-specific settings. Only applies when
+	// Type is a usage-sink connector (e.g. "openmeter").
+	// +optional
+	UsageSink *UsageSinkConfig `json:"usageSink,omitempty"`
 }
 
 // BillingConnectorStatus defines the observed state of a BillingConnector.

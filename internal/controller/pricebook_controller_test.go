@@ -62,7 +62,7 @@ var _ = Describe("PriceBookReconciler", func() {
 				cond := apimeta.FindStatusCondition(fetched.Status.Conditions, conditionReady)
 				g.Expect(cond).NotTo(BeNil())
 				g.Expect(cond.Status).To(Equal(metav1.ConditionTrue))
-				g.Expect(cond.Reason).To(Equal("Valid"))
+				g.Expect(cond.Reason).To(Equal(billingv1alpha1.ReasonValid))
 				g.Expect(fetched.Status.ObservedGeneration).To(Equal(fetched.Generation))
 			}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
 		})

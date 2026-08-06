@@ -32,6 +32,7 @@ import (
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/psp"
+	"github.com/rdwj/platform-billing-operator/internal/usagesink"
 )
 
 // BillingConnectorReconciler reconciles BillingConnector CRs by reading
@@ -39,8 +40,9 @@ import (
 // instance in the in-process BackendRegistry.
 type BillingConnectorReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Registry *BackendRegistry
+	Scheme       *runtime.Scheme
+	Registry     *BackendRegistry
+	SinkRegistry *SinkRegistry
 }
 
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=billingconnectors,verbs=get;list;watch;update;patch
@@ -54,14 +56,16 @@ func (r *BillingConnectorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	if err := r.Get(ctx, req.NamespacedName, &bc); err != nil {
 		if apierrors.IsNotFound(err) {
 			r.Registry.Delete(req.Name)
+			r.SinkRegistry.Delete(req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
 
-	// Handle deletion: remove from registry.
+	// Handle deletion: remove from both registries.
 	if !bc.DeletionTimestamp.IsZero() {
 		r.Registry.Delete(bc.Name)
+		r.SinkRegistry.Delete(bc.Name)
 		return ctrl.Result{}, nil
 	}
 
@@ -120,7 +124,7 @@ func (r *BillingConnectorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			Type:               billingv1alpha1.ConditionCredentialsValid,
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: bc.Generation,
-			Reason:             "Valid",
+			Reason:             billingv1alpha1.ReasonValid,
 			Message:            "Credentials validated and backend registered",
 		})
 
@@ -146,8 +150,34 @@ func (r *BillingConnectorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 			Type:               billingv1alpha1.ConditionCredentialsValid,
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: bc.Generation,
-			Reason:             "Valid",
+			Reason:             billingv1alpha1.ReasonValid,
 			Message:            "Credentials validated and backend registered",
+		})
+
+	case billingv1alpha1.ConnectorTypeOpenMeter:
+		if bc.Spec.UsageSink == nil {
+			bc.Status.Connected = false
+			apimeta.SetStatusCondition(&bc.Status.Conditions, metav1.Condition{
+				Type:               billingv1alpha1.ConditionCredentialsValid,
+				Status:             metav1.ConditionFalse,
+				ObservedGeneration: bc.Generation,
+				Reason:             "MissingConfig",
+				Message:            `OpenMeter connector requires a "usageSink" configuration`,
+			})
+			break
+		}
+
+		apiKey := string(secret.Data["apiKey"]) // may be empty for self-hosted
+		backend := usagesink.NewOpenMeterBackend(bc.Spec.UsageSink.Endpoint, apiKey)
+		r.SinkRegistry.Set(bc.Name, backend)
+
+		bc.Status.Connected = true
+		apimeta.SetStatusCondition(&bc.Status.Conditions, metav1.Condition{
+			Type:               billingv1alpha1.ConditionCredentialsValid,
+			Status:             metav1.ConditionTrue,
+			ObservedGeneration: bc.Generation,
+			Reason:             billingv1alpha1.ReasonValid,
+			Message:            "Credentials validated and usage sink backend registered",
 		})
 
 	default:

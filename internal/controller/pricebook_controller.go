@@ -75,7 +75,7 @@ func (r *PriceBookReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			Type:               conditionReady,
 			Status:             metav1.ConditionTrue,
 			ObservedGeneration: pb.Generation,
-			Reason:             "Valid",
+			Reason:             billingv1alpha1.ReasonValid,
 			Message:            "PriceBook spec is valid",
 		})
 	}

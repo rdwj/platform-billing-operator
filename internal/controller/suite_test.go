@@ -38,15 +38,16 @@ import (
 )
 
 var (
-	ctx          context.Context
-	cancel       context.CancelFunc
-	testEnv      *envtest.Environment
-	cfg          *rest.Config
-	k8sClient    client.Client
-	testLedger   *stubBalanceQuerier
-	testBackend  *recordingBackend
-	testPSP      *psp.RecordingBackend
-	testRegistry *BackendRegistry
+	ctx              context.Context
+	cancel           context.CancelFunc
+	testEnv          *envtest.Environment
+	cfg              *rest.Config
+	k8sClient        client.Client
+	testLedger       *stubBalanceQuerier
+	testBackend      *recordingBackend
+	testPSP          *psp.RecordingBackend
+	testRegistry     *BackendRegistry
+	testSinkRegistry *SinkRegistry
 )
 
 func TestControllers(t *testing.T) {
@@ -102,6 +103,7 @@ var _ = BeforeSuite(func() {
 	testPSP = &psp.RecordingBackend{}
 	testRegistry = NewBackendRegistry()
 	testRegistry.Set("test-connector", testPSP)
+	testSinkRegistry = NewSinkRegistry()
 	err = (&TenantAccountReconciler{
 		Client:           mgr.GetClient(),
 		Scheme:           mgr.GetScheme(),
@@ -124,9 +126,10 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	err = (&BillingConnectorReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Registry: testRegistry,
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		Registry:     testRegistry,
+		SinkRegistry: testSinkRegistry,
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 

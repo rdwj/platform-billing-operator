@@ -93,11 +93,78 @@ spec:
                 - none
                 type: string
               type:
-                description: Type is the payment service provider type.
+                description: |-
+                  Type is the connector type: a payment service provider (stripe, webhook)
+                  or a usage metering sink (openmeter).
                 enum:
                 - stripe
                 - webhook
+                - openmeter
                 type: string
+              usageSink:
+                description: |-
+                  UsageSink configures usage-sink-specific settings. Only applies when
+                  Type is a usage-sink connector (e.g. "openmeter").
+                properties:
+                  batchSize:
+                    default: 100
+                    description: BatchSize is the maximum number of events per ingestion
+                      request.
+                    type: integer
+                  endpoint:
+                    description: Endpoint is the base URL of the external metering
+                      platform.
+                    type: string
+                  flushInterval:
+                    default: 5s
+                    description: FlushInterval is the maximum time between ingestion
+                      flushes.
+                    type: string
+                  meters:
+                    description: Meters lists meter definitions to auto-configure
+                      on reconcile.
+                    items:
+                      description: MeterConfig defines a meter to auto-configure in
+                        the external platform.
+                      properties:
+                        aggregation:
+                          description: Aggregation is the aggregation function (SUM,
+                            COUNT, etc.).
+                          enum:
+                          - SUM
+                          - COUNT
+                          - AVG
+                          - MIN
+                          - MAX
+                          - UNIQUE_COUNT
+                          type: string
+                        eventType:
+                          description: EventType selects which usage events feed this
+                            meter.
+                          type: string
+                        groupBy:
+                          additionalProperties:
+                            type: string
+                          description: GroupBy maps label names to JSONPath expressions
+                            for grouping.
+                          type: object
+                        slug:
+                          description: Slug is the unique identifier for this meter.
+                          type: string
+                        valueProperty:
+                          description: ValueProperty is the JSONPath into event data
+                            for the aggregated value.
+                          type: string
+                      required:
+                      - aggregation
+                      - eventType
+                      - slug
+                      - valueProperty
+                      type: object
+                    type: array
+                required:
+                - endpoint
+                type: object
               webhookIngress:
                 description: |-
                   WebhookIngress configures the publicly reachable endpoint for PSP
