@@ -63,15 +63,23 @@ The `credentialsSecretRef` field is shared across all types. For OpenMeter, it e
 
 **Reconciliation flow:** `QueryUsage` enables cross-checking our ledger against the external platform. The initial implementation will be manual, invoked via `billctl reconcile`. Automatic periodic reconciliation is deferred.
 
-### 5. Monetize360 deprioritized
+### 5. Monetize360 is a different integration category
 
-Monetize360 is deprioritized as an integration target:
+Monetize360's RevOS has a documented billing API (accounts, contracts, services, payments
+via slug-based workflow execution). However, it does not accept raw usage events. RevOS is
+a billing system of record, not a metering sink.
 
-- No public billing or metering API (the RevOs billing module is undocumented)
-- Enterprise-sales-only with no self-service access or sandbox
-- Architectural mismatch: Monetize360 positions itself as the billing platform, not as a metering sink that receives events from an external operator
+The natural integration pattern is entity synchronization: our operator projects its
+accounts, services, and payments into RevOS so commercial operations teams can use
+Monetize360's UI for billing workflows and revenue reporting. This would require a third
+interface category (working name: `BillingPlatformBackend`) with methods like SyncAccount,
+SyncService, RecordPayment.
 
-The `UsageSinkBackend` interface is designed to be general. If Monetize360 publishes API documentation or we gain access through a partnership, an implementation can be added without interface changes.
+This is lower priority than OpenMeter (gated on enterprise tenant access) and would need
+its own ADR when prioritized. The key point for this ADR: RevOS does not change the
+PSPBackend/UsageSinkBackend split. It validates the decision to keep interfaces
+category-specific rather than building one fat unified interface, since we now have
+evidence of three distinct integration categories.
 
 ## Consequences
 
@@ -84,6 +92,6 @@ The `UsageSinkBackend` interface is designed to be general. If Monetize360 publi
 
 **Negative:**
 
-- Two registries to manage in the reconciler (deletion must clean up both)
+- Two registries to manage in the reconciler (deletion must clean up both); a third category (BillingPlatformBackend for Monetize360-style integrations) would add a third
 - If a future PSP offers both payment and metering APIs (e.g., Stripe Billing has usage records), that platform would need two separate BillingConnector CRs rather than one unified connector
 - The dispatcher layer (retry, batching, DLQ) still needs to be built in Phase 5
