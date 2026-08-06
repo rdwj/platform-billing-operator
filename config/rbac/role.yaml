@@ -73,6 +73,7 @@ rules:
   - billingconsoles/status
   - budgetpolicies/status
   - plans/status
+  - pricebooks/status
   - reservations/status
   - tenantaccounts/status
   verbs:

@@ -91,6 +91,12 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(mgr)
 	Expect(err).NotTo(HaveOccurred())
 
+	err = (&PriceBookReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr)
+	Expect(err).NotTo(HaveOccurred())
+
 	testLedger = &stubBalanceQuerier{}
 	testBackend = &recordingBackend{}
 	testPSP = &psp.RecordingBackend{}

@@ -25,6 +25,7 @@ func main() {
 	rootCmd.AddCommand(pspCmd())
 	rootCmd.AddCommand(budgetCmd())
 	rootCmd.AddCommand(driftCmd())
+	rootCmd.AddCommand(dlqCmd())
 	rootCmd.AddCommand(exportCmd())
 	rootCmd.AddCommand(invoicesCmd())
 	rootCmd.AddCommand(reservationsCmd())

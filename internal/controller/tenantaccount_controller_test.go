@@ -294,8 +294,13 @@ func createEnforcementFixtures(ctx context.Context, ns string) {
 		},
 	}
 	ExpectWithOffset(1, k8sClient.Create(ctx, pb)).To(Succeed())
-	pb.Status.State = "Active"
-	ExpectWithOffset(1, k8sClient.Status().Update(ctx, pb)).To(Succeed())
+	// The PriceBookReconciler sets status.state = "Active" for valid specs.
+	// Wait for it instead of manually patching to avoid optimistic lock conflicts.
+	EventuallyWithOffset(1, func(g Gomega) {
+		var fetched billingv1alpha1.PriceBook
+		g.Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "test-pricebook", Namespace: ns}, &fetched)).To(Succeed())
+		g.Expect(fetched.Status.State).To(Equal("Active"))
+	}, 10*time.Second, 250*time.Millisecond).Should(Succeed())
 }
 
 var _ = Describe("TenantAccountReconciler", func() {

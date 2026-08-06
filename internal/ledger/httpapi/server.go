@@ -39,6 +39,9 @@ func NewServer(ingester *ledger.Ingester, store *ledger.Store, k8sClient client.
 	mux.Handle("/v1/overview", &overviewHandler{store: store, reader: k8sClient, defaultNS: defaultNS})
 	mux.Handle("/v1/reservations", &reservationsHandler{client: k8sClient, defaultNS: defaultNS})
 	mux.Handle("/v1/reservations/", &reservationsHandler{client: k8sClient, defaultNS: defaultNS})
+	dlq := &dlqHandler{store: store, ingester: ingester}
+	mux.Handle("/v1/dlq", dlq)
+	mux.Handle("/v1/dlq/replay", dlq)
 	mux.Handle("/v1/health", &healthHandler{store: store})
 	mux.HandleFunc("/healthz", handleHealthz)
 	return mux

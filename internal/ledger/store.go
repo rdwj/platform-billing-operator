@@ -24,7 +24,12 @@ type Store struct {
 }
 
 func NewStore(ctx context.Context, dsn string) (*Store, error) {
-	pool, err := pgxpool.New(ctx, dsn)
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse dsn: %w", err)
+	}
+	config.ConnConfig.RuntimeParams["timezone"] = "UTC"
+	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
 		return nil, fmt.Errorf("create pgx pool: %w", err)
 	}
@@ -394,7 +399,7 @@ func (s *Store) QueryBucketedUsage(ctx context.Context, tenantID string, from, t
 
 	query := fmt.Sprintf(`
 		WITH charge_agg AS (
-		  SELECT date_trunc('%s', c.rated_at) AS bucket_start,
+		  SELECT date_trunc('%s', c.rated_at AT TIME ZONE 'UTC') AS bucket_start,
 		         ue.sku,
 		         sum(c.amount) AS charged,
 		         count(*) AS events
@@ -404,7 +409,7 @@ func (s *Store) QueryBucketedUsage(ctx context.Context, tenantID string, from, t
 		  GROUP BY 1, 2
 		),
 		qty_agg AS (
-		  SELECT date_trunc('%s', c.rated_at) AS bucket_start,
+		  SELECT date_trunc('%s', c.rated_at AT TIME ZONE 'UTC') AS bucket_start,
 		         ue.sku,
 		         kv.key,
 		         sum(kv.value::numeric) AS val
@@ -477,7 +482,7 @@ func (s *Store) QueryBucketedUsageAll(ctx context.Context, from, to time.Time, b
 
 	query := fmt.Sprintf(`
 		WITH charge_agg AS (
-		  SELECT date_trunc('%s', c.rated_at) AS bucket_start,
+		  SELECT date_trunc('%s', c.rated_at AT TIME ZONE 'UTC') AS bucket_start,
 		         ue.sku,
 		         %s AS geo,
 		         sum(c.amount) AS charged,
@@ -488,7 +493,7 @@ func (s *Store) QueryBucketedUsageAll(ctx context.Context, from, to time.Time, b
 		  GROUP BY 1, 2%s
 		),
 		qty_agg AS (
-		  SELECT date_trunc('%s', c.rated_at) AS bucket_start,
+		  SELECT date_trunc('%s', c.rated_at AT TIME ZONE 'UTC') AS bucket_start,
 		         ue.sku,
 		         %s AS geo,
 		         kv.key,
@@ -1492,6 +1497,80 @@ func (s *Store) QueryDLQDepth(ctx context.Context) (int64, error) {
 		return 0, fmt.Errorf("query dlq depth: %w", err)
 	}
 	return count, nil
+}
+
+// ListDLQ returns unreplayed DLQ entries ordered by received_at, up to limit.
+// If limit is <= 0, it defaults to 100.
+func (s *Store) ListDLQ(ctx context.Context, limit int) ([]DLQEntry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT dlq_id, raw, reason, source, received_at, attempts, COALESCE(last_error, '')
+		FROM dlq
+		WHERE replayed_at IS NULL
+		ORDER BY received_at
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("list dlq: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []DLQEntry
+	for rows.Next() {
+		var e DLQEntry
+		if err := rows.Scan(&e.ID, &e.Raw, &e.Reason, &e.Source,
+			&e.ReceivedAt, &e.Attempts, &e.LastError); err != nil {
+			return nil, fmt.Errorf("scan dlq entry: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	return entries, rows.Err()
+}
+
+// GetDLQEntry fetches a single unreplayed DLQ entry by ID.
+// Returns nil, nil if the entry does not exist or is already replayed.
+func (s *Store) GetDLQEntry(ctx context.Context, dlqID string) (*DLQEntry, error) {
+	var e DLQEntry
+	err := s.pool.QueryRow(ctx, `
+		SELECT dlq_id, raw, reason, source, received_at, attempts, COALESCE(last_error, '')
+		FROM dlq
+		WHERE dlq_id = $1 AND replayed_at IS NULL`, dlqID,
+	).Scan(&e.ID, &e.Raw, &e.Reason, &e.Source, &e.ReceivedAt, &e.Attempts, &e.LastError)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get dlq entry: %w", err)
+	}
+	return &e, nil
+}
+
+// ReplayDLQEntry marks a single DLQ entry as replayed by setting replayed_at
+// to now(). Returns an error if the entry does not exist or is already replayed.
+func (s *Store) ReplayDLQEntry(ctx context.Context, dlqID string) error {
+	tag, err := s.pool.Exec(ctx,
+		"UPDATE dlq SET replayed_at = now() WHERE dlq_id = $1 AND replayed_at IS NULL",
+		dlqID)
+	if err != nil {
+		return fmt.Errorf("replay dlq entry: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("dlq entry %s not found or already replayed", dlqID)
+	}
+	return nil
+}
+
+// IncrementDLQAttempts bumps the attempt counter and records the latest error
+// for a DLQ entry.
+func (s *Store) IncrementDLQAttempts(ctx context.Context, dlqID string, lastErr string) error {
+	_, err := s.pool.Exec(ctx,
+		"UPDATE dlq SET attempts = attempts + 1, last_error = $2 WHERE dlq_id = $1",
+		dlqID, lastErr)
+	if err != nil {
+		return fmt.Errorf("increment dlq attempts: %w", err)
+	}
+	return nil
 }
 
 func (s *Store) QueryDriftExceededCount(ctx context.Context) (int64, error) {

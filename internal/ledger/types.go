@@ -197,3 +197,16 @@ type ModelRevenue struct {
 	SKU    string
 	Amount string
 }
+
+// DLQEntry represents a dead-letter queue entry for events that failed
+// initial processing. The Raw field holds the original JSON payload for
+// replay through IngestEvent.
+type DLQEntry struct {
+	ID         string          `json:"id"`
+	Raw        json.RawMessage `json:"raw"`
+	Reason     string          `json:"reason"`
+	Source     string          `json:"source"`
+	ReceivedAt time.Time       `json:"receivedAt"`
+	Attempts   int             `json:"attempts"`
+	LastError  string          `json:"lastError,omitempty"`
+}

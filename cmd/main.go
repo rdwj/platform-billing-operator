@@ -236,6 +236,14 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.PriceBookReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "PriceBook")
+		os.Exit(1)
+	}
+
 	if err = (&billingv1alpha1.ReservationValidator{}).SetupWebhookWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create webhook", "webhook", "Reservation")
 		os.Exit(1)
