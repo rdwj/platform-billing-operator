@@ -2,9 +2,10 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { fmtMoney, badgeColor, fmtTokenCount } from './utils.js';
 import { DISPLAY, PAL } from './ui.jsx';
 import { Overview, Models, Tenants, TenantDetail, Plans, UsageExplorer, Billing, Cost, Metering, ApiSurface } from './screens-provider.jsx';
-import { TOverview, TModels, TUsage, TBilling, TBudgets, TKeys } from './screens-tenant.jsx';
+import { TOverview, TModels, TUsage, TBilling, TBudgets, TKeys, TReservations } from './screens-tenant.jsx';
+import CapacityCalendar from './screens-reservations.jsx';
 import Integrations from './screens-integrations.jsx';
-import { fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport, fetchPlans, fetchPriceBooks, fetchUsage, fetchOverview, fetchConnectors, fetchWebhooks, fetchInvoiceRuns, fetchAdjustmentsAll, fetchHealth, fetchDriftAll, fetchPricing, fetchInvoices } from './api.js';
+import { fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport, fetchPlans, fetchPriceBooks, fetchUsage, fetchOverview, fetchConnectors, fetchWebhooks, fetchInvoiceRuns, fetchAdjustmentsAll, fetchHealth, fetchDriftAll, fetchPricing, fetchInvoices, fetchReservations, createReservation, cancelReservation } from './api.js';
 
 function buildTenantDetail(t, credited, frozen) {
   const bal = t.balance ? parseFloat(t.balance) : null;
@@ -86,7 +87,7 @@ const PROVIDER_NAV = [
   { hdr: 'Customers' },
   { id: 'tenants', label: 'Tenants' }, { id: 'usage', label: 'Usage explorer' },
   { hdr: 'Operate' },
-  { id: 'integrations', label: 'Integrations' }, { id: 'billing', label: 'Billing operations' }, { id: 'cost', label: 'Cost & margin' }, { id: 'metering', label: 'Metering health' },
+  { id: 'reservations', label: 'GPU reservations' }, { id: 'integrations', label: 'Integrations' }, { id: 'billing', label: 'Billing operations' }, { id: 'cost', label: 'Cost & margin' }, { id: 'metering', label: 'Metering health' },
   { hdr: 'Reference' },
   { id: 'api', label: 'API surface' }
 ];
@@ -95,7 +96,9 @@ const TENANT_NAV = [
   { hdr: 'Tenant portal' },
   { id: 't-overview', label: 'Overview' }, { id: 't-models', label: 'Model directory' }, { id: 't-usage', label: 'Usage & reports' },
   { hdr: 'Billing' },
-  { id: 't-billing', label: 'Balance & billing' }, { id: 't-budgets', label: 'Budgets & alerts' }, { id: 't-keys', label: 'API keys' }
+  { id: 't-billing', label: 'Balance & billing' }, { id: 't-budgets', label: 'Budgets & alerts' }, { id: 't-keys', label: 'API keys' },
+  { hdr: 'GPU' },
+  { id: 't-reservations', label: 'Reservations' }
 ];
 
 export default function App() {
@@ -130,6 +133,8 @@ export default function App() {
   const [apiPortalPricing, setApiPortalPricing] = useState(null);
   const [apiPortalInvoices, setApiPortalInvoices] = useState(null);
   const [apiPortalUsage, setApiPortalUsage] = useState(null);
+  const [apiReservations, setApiReservations] = useState(null);
+  const [apiPortalReservations, setApiPortalReservations] = useState(null);
 
   useEffect(() => {
     fetchTenants().then(data => {
@@ -153,6 +158,7 @@ export default function App() {
     fetchAdjustmentsAll('manual_credit', 20).then(data => { if (data && data.adjustments) setApiCredits(data.adjustments); });
     fetchHealth().then(data => { if (data) setApiHealth(data); });
     fetchDriftAll().then(data => { if (data) setApiDrift(data); });
+    fetchReservations().then(data => { if (data) setApiReservations(data); });
   }, []);
 
   // Load tenant-specific data when a tenant is selected (provider drill-in)
@@ -184,6 +190,7 @@ export default function App() {
     const now = new Date();
     const from14 = new Date(now.getTime() - 14 * 86400000).toISOString();
     fetchUsage({ tenant: tid, from: from14, to: now.toISOString(), bucket: 'day' }).then(data => { if (data) setApiPortalUsage(data); });
+    fetchReservations(tid).then(data => { if (data) setApiPortalReservations(data); });
   }, [persona, apiTenants]);
 
   const prov = persona === 'provider';
@@ -222,6 +229,30 @@ export default function App() {
         status: k.enabled ? 'Active' : 'Disabled', st: k.enabled ? 'green' : 'grey',
       }))
     : [];
+
+  // Reservations (provider = all, tenant portal = per-tenant)
+  const allReservations = apiReservations && apiReservations.reservations ? apiReservations.reservations : [];
+  const portalReservations = apiPortalReservations && apiPortalReservations.reservations ? apiPortalReservations.reservations : [];
+
+  const handleCreateReservation = async body => {
+    const result = await createReservation(body);
+    if (!result.error) {
+      fetchReservations().then(data => { if (data) setApiReservations(data); });
+      if (portalTenant) {
+        fetchReservations(portalTenant.tenant_id).then(data => { if (data) setApiPortalReservations(data); });
+      }
+    }
+  };
+
+  const handleCancelReservation = async name => {
+    const result = await cancelReservation(name);
+    if (!result.error) {
+      fetchReservations().then(data => { if (data) setApiReservations(data); });
+      if (portalTenant) {
+        fetchReservations(portalTenant.tenant_id).then(data => { if (data) setApiPortalReservations(data); });
+      }
+    }
+  };
 
   const openTenant = t => { setTenant(t); setScreen('tenants'); setTab('balance'); };
   const goNav = id => { if (prov) { setScreen(id); setTenant(null); } else setTScreen(id); };
@@ -278,6 +309,7 @@ export default function App() {
                 toggleFreeze={() => setFrozen({ ...frozen, [td.tid]: !frozen[td.tid] })}
                 freezeLabel={frozen[td.tid] ? 'Unfreeze keys' : 'Freeze keys'} />
             )}
+            {prov && screen === 'reservations' && <CapacityCalendar reservations={allReservations} />}
             {prov && screen === 'usage' && <UsageExplorer apiUsage={apiUsage} />}
             {prov && screen === 'integrations' && <Integrations />}
             {prov && screen === 'billing' && <Billing apiConnectors={apiConnectors} apiInvoiceRuns={apiInvoiceRuns} apiWebhooks={apiWebhooks} apiCredits={apiCredits} apiTenants={apiTenants} />}
@@ -290,6 +322,7 @@ export default function App() {
             {!prov && th && tScreen === 't-billing' && <TBilling th={th} ledger={ledgerView} arOn={arOn} toggleAr={() => setArOn(!arOn)} invoices={portalInvoices} />}
             {!prov && th && tScreen === 't-budgets' && <TBudgets apiBudgets={apiBudgets} />}
             {!prov && th && tScreen === 't-keys' && <TKeys keys={portalKeys.concat(extraKeys)} createKey={createKey} secret={secret} dismiss={() => setSecret(null)} />}
+            {!prov && th && tScreen === 't-reservations' && <TReservations reservations={portalReservations} onCreateReservation={handleCreateReservation} onCancelReservation={handleCancelReservation} />}
             {!prov && !th && <div style={{ padding: '40px 0', textAlign: 'center', color: '#6a6e73' }}>Loading tenant portal...</div>}
           </div>
         </div>

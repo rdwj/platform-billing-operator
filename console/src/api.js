@@ -11,6 +11,23 @@ async function fetchJSON(url) {
   }
 }
 
+async function postJSON(url, body) {
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      return { error: text || res.statusText };
+    }
+    return await res.json();
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
 export function fetchTenants() {
   return fetchJSON('/api/tenants');
 }
@@ -105,6 +122,21 @@ export function fetchHealth() {
 
 export function fetchDriftAll(limit = 20) {
   return fetchJSON(`/api/drift?limit=${limit}`);
+}
+
+export function fetchReservations(tenant) {
+  const params = new URLSearchParams();
+  if (tenant) params.set('tenant', tenant);
+  const qs = params.toString();
+  return fetchJSON(`/api/reservations${qs ? '?' + qs : ''}`);
+}
+
+export function createReservation(body) {
+  return postJSON('/api/reservations', body);
+}
+
+export function cancelReservation(name) {
+  return postJSON(`/api/reservations/${encodeURIComponent(name)}/cancel`, {});
 }
 
 export async function executeStep(walkthroughId, stepId, formValues) {

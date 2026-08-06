@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, PageH, SecTitle, MiniLabel, Kpi, Badge, Btn, THead, TRow, Mono, Dim, Progress, Stacked, DISPLAY, MONO } from './ui.jsx';
 import { LedgerTable, BudgetsPanel, KeysTable } from './screens-provider.jsx';
 import { fmtMoney, fmtTokenCount, USAGE_LEGEND } from './utils.js';
@@ -207,3 +207,99 @@ export function TKeys({ keys, createKey, secret, dismiss }) {
     </div>
   );
 }
+
+/* ── Reservation helpers ── */
+
+const RES_STATE_BADGE = { Active: 'green', Confirmed: 'blue', Cancelled: 'grey', Expired: 'gold' };
+
+function fmtWindow(w) {
+  if (!w || !w.start || !w.end) return '---';
+  const fmt = d => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+  return `${fmt(w.start)} – ${fmt(w.end)}`;
+}
+
+const inputStyle = { border: '1px solid #c7c7c7', borderRadius: 6, padding: '6px 10px', fontSize: 13, fontFamily: "'Red Hat Text',sans-serif", width: '100%', boxSizing: 'border-box' };
+
+const EMPTY_FORM = { sku: '', count: '1', geo: '', class: 'Guaranteed', start: '', end: '', monthlyPrice: '' };
+
+export function TReservations({ reservations, onCreateReservation, onCancelReservation }) {
+  const [form, setForm] = useState({ ...EMPTY_FORM });
+  const [showForm, setShowForm] = useState(false);
+
+  const set = (k, v) => setForm(prev => ({ ...prev, [k]: v }));
+
+  const handleCreate = () => {
+    if (!form.sku || !form.start || !form.end || !form.monthlyPrice) return;
+    onCreateReservation({
+      tenant: '',
+      sku: form.sku,
+      count: parseInt(form.count, 10) || 1,
+      geo: form.geo,
+      class: form.class,
+      start: new Date(form.start + 'T00:00:00Z').toISOString(),
+      end: new Date(form.end + 'T23:59:59Z').toISOString(),
+      monthlyPrice: form.monthlyPrice,
+    });
+    setForm({ ...EMPTY_FORM });
+    setShowForm(false);
+  };
+
+  const handleCancel = name => {
+    if (window.confirm(`Cancel reservation ${name}? Committed-use charges will be pro-rated to today.`)) {
+      onCancelReservation(name);
+    }
+  };
+
+  const cols = '1.5fr 1.2fr .5fr .7fr .8fr 1.4fr .8fr .6fr .6fr';
+  return (
+    <div data-screen-label="Tenant reservations">
+      <PageH
+        title="GPU reservations"
+        sub="Reserved GPU capacity for your workloads. Guaranteed reservations are protected from preemption."
+        right={<Btn primary small onClick={() => setShowForm(!showForm)}>{showForm ? 'Cancel' : 'New reservation'}</Btn>}
+      />
+
+      {showForm && (
+        <Card style={{ marginBottom: 14, padding: '18px 20px' }}>
+          <SecTitle style={{ marginBottom: 14 }}>New reservation</SecTitle>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+            <div><MiniLabel>SKU</MiniLabel><input style={inputStyle} value={form.sku} onChange={e => set('sku', e.target.value)} placeholder="nvidia-a100-80gb" /></div>
+            <div><MiniLabel>Count</MiniLabel><input type="number" min="1" style={inputStyle} value={form.count} onChange={e => set('count', e.target.value)} /></div>
+            <div><MiniLabel>Geography</MiniLabel><input style={inputStyle} value={form.geo} onChange={e => set('geo', e.target.value)} placeholder="us-east" /></div>
+            <div><MiniLabel>Class</MiniLabel><select style={inputStyle} value={form.class} onChange={e => set('class', e.target.value)}><option>Guaranteed</option><option>Preemptible</option></select></div>
+            <div><MiniLabel>Start date</MiniLabel><input type="date" style={inputStyle} value={form.start} onChange={e => set('start', e.target.value)} /></div>
+            <div><MiniLabel>End date</MiniLabel><input type="date" style={inputStyle} value={form.end} onChange={e => set('end', e.target.value)} /></div>
+            <div><MiniLabel>Monthly price</MiniLabel><input style={{ ...inputStyle, fontFamily: MONO }} value={form.monthlyPrice} onChange={e => set('monthlyPrice', e.target.value)} placeholder="14400.00" /></div>
+            <div style={{ display: 'flex', alignItems: 'flex-end' }}><Btn primary onClick={handleCreate}>Create reservation</Btn></div>
+          </div>
+        </Card>
+      )}
+
+      {reservations && reservations.length > 0 ? (
+        <Card style={{ padding: 0, overflow: 'hidden' }}>
+          <THead cols={cols} labels={['Name', 'SKU', 'GPUs', 'Geo', 'Class', 'Window', 'Price/mo', 'State', '']} />
+          {reservations.map(r => (
+            <TRow key={r.name} cols={cols}>
+              <Mono style={{ fontSize: 11.5 }}>{r.name}</Mono>
+              <div>{r.sku}</div>
+              <Mono>{r.count}</Mono>
+              <div>{r.geo}</div>
+              <div>{r.class}</div>
+              <Dim style={{ fontSize: 12 }}>{fmtWindow(r.window)}</Dim>
+              <Mono>{fmtMoney(r.monthlyPrice)}</Mono>
+              <Badge c={RES_STATE_BADGE[r.state] || 'grey'}>{r.state}</Badge>
+              <div>
+                {(r.state === 'Active' || r.state === 'Confirmed') && (
+                  <Btn danger small onClick={() => handleCancel(r.name)}>Cancel</Btn>
+                )}
+              </div>
+            </TRow>
+          ))}
+        </Card>
+      ) : (
+        <Card style={{ padding: '18px 20px' }}><Dim>No GPU reservations yet. Create one to reserve capacity for your workloads.</Dim></Card>
+      )}
+    </div>
+  );
+}
+
