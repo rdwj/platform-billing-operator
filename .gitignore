@@ -51,3 +51,5 @@ cmd/capture-filter/target/
 # Container build artifacts
 Containerfile.cross
 /psp-connector
+/billctl
+/ledger-svc
