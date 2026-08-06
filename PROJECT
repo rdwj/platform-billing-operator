@@ -32,4 +32,52 @@ resources:
   kind: Plan
   path: github.com/rdwj/platform-billing-operator/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: opendatahub.io
+  group: billing
+  kind: BillingConnector
+  path: github.com/rdwj/platform-billing-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: false
+  controller: true
+  domain: opendatahub.io
+  group: billing
+  kind: BillingConsole
+  path: github.com/rdwj/platform-billing-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: opendatahub.io
+  group: billing
+  kind: BudgetPolicy
+  path: github.com/rdwj/platform-billing-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: opendatahub.io
+  group: billing
+  kind: Reservation
+  path: github.com/rdwj/platform-billing-operator/api/v1alpha1
+  version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: opendatahub.io
+  group: billing
+  kind: TenantAccount
+  path: github.com/rdwj/platform-billing-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"

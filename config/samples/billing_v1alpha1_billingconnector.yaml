@@ -1,0 +1,11 @@
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: BillingConnector
+metadata:
+  labels:
+    app.kubernetes.io/name: platform-billing-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: billingconnector-sample
+spec:
+  type: stripe
+  credentialsSecretRef:
+    name: stripe-credentials

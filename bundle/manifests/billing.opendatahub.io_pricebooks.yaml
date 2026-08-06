@@ -55,6 +55,16 @@ spec:
           spec:
             description: PriceBookSpec defines the desired state of a PriceBook.
             properties:
+              clientDisconnectPolicy:
+                default: bill_partial
+                description: |-
+                  ClientDisconnectPolicy controls charging when the client disconnects mid-stream.
+                  "bill_partial" (default): charge for tokens delivered before disconnect.
+                  "zero_charge": no charge on client disconnect.
+                enum:
+                - bill_partial
+                - zero_charge
+                type: string
               committedUse:
                 description: CommittedUse defines committed-use pricing tiers for
                   sustained throughput.
@@ -108,6 +118,16 @@ spec:
                 format: int32
                 minimum: 0
                 type: integer
+              providerFaultPolicy:
+                default: zero_charge
+                description: |-
+                  ProviderFaultPolicy controls charging when the upstream model returns an error.
+                  "zero_charge" (default): no charge for upstream failures.
+                  "bill_partial": charge for any partial usage before the failure.
+                enum:
+                - zero_charge
+                - bill_partial
+                type: string
               skus:
                 description: SKUs is the list of SKU pricing entries. At least one
                   SKU is required.

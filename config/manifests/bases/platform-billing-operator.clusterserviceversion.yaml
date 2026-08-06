@@ -11,6 +11,29 @@ spec:
   customresourcedefinitions:
     owned:
     - description: |-
+        BillingConnector is the Schema for the billingconnectors API.
+        It configures integration with a payment service provider (Stripe, generic
+        webhook, etc.) for the psp-connector binary.
+      displayName: Billing Connector
+      kind: BillingConnector
+      name: billingconnectors.billing.opendatahub.io
+      version: v1alpha1
+    - description: |-
+        BillingConsole is the Schema for the billingconsoles API.
+        It configures operator-managed deployment of the billing console UI.
+        Cluster-scoped; the controller enforces singleton semantics (name: default).
+      displayName: Billing Console
+      kind: BillingConsole
+      name: billingconsoles.billing.opendatahub.io
+      version: v1alpha1
+    - description: |-
+        BudgetPolicy is the Schema for the budgetpolicies API.
+        It defines spending caps and threshold-based actions for a TenantAccount.
+      displayName: Budget Policy
+      kind: BudgetPolicy
+      name: budgetpolicies.billing.opendatahub.io
+      version: v1alpha1
+    - description: |-
         Plan is the Schema for the plans API.
         It defines a billing plan with rate limits and model scopes that compiles
         down to Kuadrant TokenRateLimitPolicy, RateLimitPolicy, and AuthPolicy CRs.
@@ -25,6 +48,21 @@ spec:
       displayName: Price Book
       kind: PriceBook
       name: pricebooks.billing.opendatahub.io
+      version: v1alpha1
+    - description: |-
+        Reservation is the Schema for the reservations API.
+        It represents a calendar-committed GPU reservation with a time window,
+        capacity class (Guaranteed or Preemptible), and fixed monthly pricing.
+      displayName: Reservation
+      kind: Reservation
+      name: reservations.billing.opendatahub.io
+      version: v1alpha1
+    - description: |-
+        TenantAccount is the Schema for the tenantaccounts API.
+        It represents a billing tenant with a wallet, billing mode, and lifecycle state.
+      displayName: Tenant Account
+      kind: TenantAccount
+      name: tenantaccounts.billing.opendatahub.io
       version: v1alpha1
   description: |
     Compiles billing Plans into Kuadrant enforcement policies
@@ -48,6 +86,7 @@ spec:
   - supported: true
     type: AllNamespaces
   maturity: alpha
+  minKubeVersion: 1.27.0
   provider:
     name: Open Data Hub
   version: 0.0.0

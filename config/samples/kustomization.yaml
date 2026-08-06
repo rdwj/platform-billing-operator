@@ -1,7 +1,12 @@
 resources:
+- billing_v1alpha1_billingconnector.yaml
 - billing_v1alpha1_billingconsole.yaml
+- billing_v1alpha1_budgetpolicy.yaml
+- billing_v1alpha1_meteringpipeline.yaml
+- billing_v1alpha1_plan.yaml
 - billing_v1alpha1_pricebook.yaml
 - billing_v1alpha1_pricebook_gpu.yaml
-- billing_v1alpha1_plan.yaml
 - billing_v1alpha1_reservation_guaranteed.yaml
 - billing_v1alpha1_reservation_preemptible.yaml
+- billing_v1alpha1_tenantaccount.yaml
+- billing_v1alpha1_tenantaccount_showback.yaml
