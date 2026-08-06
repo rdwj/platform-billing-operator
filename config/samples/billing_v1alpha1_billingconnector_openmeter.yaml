@@ -1,0 +1,32 @@
+apiVersion: billing.opendatahub.io/v1alpha1
+kind: BillingConnector
+metadata:
+  name: openmeter-sink
+  namespace: billing-system
+spec:
+  type: openmeter
+  credentialsSecretRef:
+    name: openmeter-keys
+  usageSink:
+    endpoint: "http://openmeter-api:8888"
+    batchSize: 100
+    flushInterval: "5s"
+    meters:
+      - slug: inference_prompt_tokens
+        eventType: inference
+        aggregation: SUM
+        valueProperty: $.prompt_tokens
+        groupBy:
+          model: $.model
+      - slug: inference_completion_tokens
+        eventType: inference
+        aggregation: SUM
+        valueProperty: $.completion_tokens
+        groupBy:
+          model: $.model
+      - slug: inference_request_count
+        eventType: inference
+        aggregation: COUNT
+        valueProperty: $.prompt_tokens
+        groupBy:
+          model: $.model

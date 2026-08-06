@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmeter-sink-worker
+  namespace: billing-system
+  labels:
+    app: openmeter-sink-worker
+    app.kubernetes.io/part-of: openmeter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openmeter-sink-worker
+  template:
+    metadata:
+      labels:
+        app: openmeter-sink-worker
+        app.kubernetes.io/part-of: openmeter
+    spec:
+      serviceAccountName: openmeter
+      enableServiceLinks: false
+      containers:
+        - name: sink-worker
+          image: ghcr.io/openmeterio/openmeter:latest
+          command:
+            - openmeter-sink-worker
+            - --config
+            - /etc/openmeter/config.yaml
+          ports:
+            - containerPort: 10000
+              name: health
+          volumeMounts:
+            - name: config
+              mountPath: /etc/openmeter/config.yaml
+              subPath: config.yaml
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 10000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: openmeter-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmeter-sink-worker
+  namespace: billing-system
+  labels:
+    app: openmeter-sink-worker
+    app.kubernetes.io/part-of: openmeter
+spec:
+  selector:
+    app: openmeter-sink-worker
+  ports:
+    - port: 10000
+      targetPort: 10000
+      name: health

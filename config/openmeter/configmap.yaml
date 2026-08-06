@@ -1,0 +1,64 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openmeter-config
+  namespace: billing-system
+  labels:
+    app.kubernetes.io/part-of: openmeter
+data:
+  config.yaml: |
+    ingest:
+      kafka:
+        broker: openmeter-kafka:9092
+        brokerAddressFamily: v4
+        socketKeepAliveEnable: true
+        topicMetadataRefreshInterval: 10s
+
+    aggregation:
+      clickhouse:
+        address: openmeter-clickhouse:9000
+
+    sink:
+      minCommitCount: 1
+      namespaceRefetch: 1s
+      namespaceRefetchTimeout: 1s
+      kafka:
+        brokers: openmeter-kafka:9092
+        brokerAddressFamily: v4
+        socketKeepAliveEnable: true
+        topicMetadataRefreshInterval: 10s
+      dedupe:
+        enabled: true
+        driver: redis
+        config:
+          address: openmeter-redis:6379
+          database: 0
+          expiration: 768h
+
+    postgres:
+      url: postgres://postgres:postgres@openmeter-postgres:5432/postgres?sslmode=disable
+      autoMigrate: migration
+
+    meters:
+      - slug: inference_prompt_tokens
+        description: Total prompt tokens consumed per inference request
+        eventType: inference
+        aggregation: SUM
+        valueProperty: $.prompt_tokens
+        groupBy:
+          model: $.model
+
+      - slug: inference_completion_tokens
+        description: Total completion tokens produced per inference request
+        eventType: inference
+        aggregation: SUM
+        valueProperty: $.completion_tokens
+        groupBy:
+          model: $.model
+
+      - slug: inference_request_count
+        description: Count of inference requests
+        eventType: inference
+        aggregation: COUNT
+        groupBy:
+          model: $.model

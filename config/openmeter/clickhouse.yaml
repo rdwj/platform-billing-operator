@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmeter-clickhouse
+  namespace: billing-system
+  labels:
+    app: openmeter-clickhouse
+    app.kubernetes.io/part-of: openmeter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openmeter-clickhouse
+  template:
+    metadata:
+      labels:
+        app: openmeter-clickhouse
+        app.kubernetes.io/part-of: openmeter
+    spec:
+      serviceAccountName: openmeter
+      containers:
+        - name: clickhouse
+          image: clickhouse/clickhouse-server:25.12.3-alpine
+          ports:
+            - containerPort: 9000
+              name: native
+            - containerPort: 8123
+              name: http
+          env:
+            - name: CLICKHOUSE_USER
+              value: "default"
+            - name: CLICKHOUSE_PASSWORD
+              value: "default"
+            - name: CLICKHOUSE_DB
+              value: "openmeter"
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 8123
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 500m
+              memory: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmeter-clickhouse
+  namespace: billing-system
+  labels:
+    app: openmeter-clickhouse
+    app.kubernetes.io/part-of: openmeter
+spec:
+  selector:
+    app: openmeter-clickhouse
+  ports:
+    - port: 9000
+      targetPort: 9000
+      name: native
+    - port: 8123
+      targetPort: 8123
+      name: http

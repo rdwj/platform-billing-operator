@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmeter-postgres
+  namespace: billing-system
+  labels:
+    app: openmeter-postgres
+    app.kubernetes.io/part-of: openmeter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openmeter-postgres
+  template:
+    metadata:
+      labels:
+        app: openmeter-postgres
+        app.kubernetes.io/part-of: openmeter
+    spec:
+      serviceAccountName: openmeter
+      containers:
+        - name: postgres
+          image: postgres:14.20-alpine3.23
+          args:
+            - postgres
+            - -c
+            - wal_level=logical
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_USER
+              value: "postgres"
+            - name: POSTGRES_DB
+              value: "postgres"
+            - name: POSTGRES_PASSWORD
+              value: "postgres"
+            - name: POSTGRES_HOST_AUTH_METHOD
+              value: "md5"
+          readinessProbe:
+            exec:
+              command:
+                - pg_isready
+                - -d
+                - postgres
+                - -U
+                - postgres
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmeter-postgres
+  namespace: billing-system
+  labels:
+    app: openmeter-postgres
+    app.kubernetes.io/part-of: openmeter
+spec:
+  selector:
+    app: openmeter-postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres

@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openmeter-api
+  namespace: billing-system
+  labels:
+    app: openmeter-api
+    app.kubernetes.io/part-of: openmeter
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openmeter-api
+  template:
+    metadata:
+      labels:
+        app: openmeter-api
+        app.kubernetes.io/part-of: openmeter
+    spec:
+      serviceAccountName: openmeter
+      enableServiceLinks: false
+      containers:
+        - name: openmeter
+          image: ghcr.io/openmeterio/openmeter:latest
+          command:
+            - openmeter
+            - --address
+            - 0.0.0.0:8888
+            - --config
+            - /etc/openmeter/config.yaml
+          ports:
+            - containerPort: 8888
+              name: http
+          volumeMounts:
+            - name: config
+              mountPath: /etc/openmeter/config.yaml
+              subPath: config.yaml
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /api/v1/debug/metrics
+              port: 8888
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi
+      volumes:
+        - name: config
+          configMap:
+            name: openmeter-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: openmeter-api
+  namespace: billing-system
+  labels:
+    app: openmeter-api
+    app.kubernetes.io/part-of: openmeter
+spec:
+  selector:
+    app: openmeter-api
+  ports:
+    - port: 8888
+      targetPort: 8888
+      name: http
