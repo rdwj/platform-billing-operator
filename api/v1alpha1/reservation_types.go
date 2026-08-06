@@ -32,6 +32,7 @@ const (
 
 	ConditionCapacityConfirmed = "CapacityConfirmed"
 	ConditionCharged           = "Charged"
+	ConditionKueueSynced       = "KueueSynced"
 )
 
 // ReservationWindow defines the time window for a GPU reservation.

@@ -92,6 +92,22 @@ func (r *ReservationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 
 	case billingv1alpha1.ReservationStateExpired, billingv1alpha1.ReservationStateCancelled:
+		if !apimeta.IsStatusConditionTrue(res.Status.Conditions, billingv1alpha1.ConditionKueueSynced) {
+			if err := r.compileAndTrigger(ctx, &res); err != nil {
+				logger.Error(err, "CQ recompilation on terminal state failed, will retry", "reservation", res.Name)
+				return ctrl.Result{RequeueAfter: requeueCapacityCheck}, nil
+			}
+			apimeta.SetStatusCondition(&res.Status.Conditions, metav1.Condition{
+				Type:               billingv1alpha1.ConditionKueueSynced,
+				Status:             metav1.ConditionTrue,
+				ObservedGeneration: res.Generation,
+				Reason:             "Compiled",
+				Message:            "CQ recompiled after terminal transition",
+			})
+			if err := r.Status().Update(ctx, &res); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
 		return ctrl.Result{}, nil
 	}
 

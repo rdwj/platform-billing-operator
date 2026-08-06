@@ -335,6 +335,10 @@ demo-g1: ## Run G1 demo (GPU enforcement via Kueue — Drain/Preempt/unified wal
 test-g2-capacity: ## Run G2 Phase 2 capacity feasibility test (Reservation + Kueue CQ compilation)
 	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/test-g2-capacity.sh
 
+.PHONY: demo-g2
+demo-g2: ## Run G2 demo (GPU reservations — Guaranteed/Preemptible/cancel lifecycle)
+	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-g2.sh
+
 .PHONY: demo-m5
 demo-m5: ## Run M5 demo (Reconciler + Budgets + Exports)
 	@KUBECTL=$(KUBECTL) CLUSTER_CONTEXT=$(CLUSTER_CONTEXT) DEMO_NS=$(BILLING_DEV_NS) hack/demo-m5.sh

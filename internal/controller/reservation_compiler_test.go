@@ -300,6 +300,49 @@ func TestCompileKueueState_IgnoresRequestedAndExpired(t *testing.T) {
 	}
 }
 
+func TestCompileKueueState_CQDeletedOnCancel(t *testing.T) {
+	existingCQ := &kueuev1beta1.ClusterQueue{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "tenant-a-guaranteed",
+			Labels: map[string]string{
+				labelTenant:           "tenant-a",
+				labelReservationClass: billingv1alpha1.ReservationClassGuaranteed,
+				labelManagedBy:        managedByReservation,
+			},
+		},
+		Spec: kueuev1beta1.ClusterQueueSpec{
+			ResourceGroups: []kueuev1beta1.ResourceGroup{{
+				CoveredResources: []corev1.ResourceName{gpuResourceKey},
+				Flavors: []kueuev1beta1.FlavorQuotas{{
+					Name: "gpu-h200",
+					Resources: []kueuev1beta1.ResourceQuota{{
+						Name:         gpuResourceKey,
+						NominalQuota: resource.MustParse("4"),
+					}},
+				}},
+			}},
+		},
+	}
+
+	c := newCompilerClient(t,
+		testResourceFlavor("gpu-h200", "H200"),
+		existingCQ,
+		testReservation("res-cancelled", "ns-1", "tenant-a", "h200", "us-east",
+			billingv1alpha1.ReservationClassGuaranteed,
+			billingv1alpha1.ReservationStateCancelled, 4),
+	)
+
+	if err := compileKueueState(context.Background(), c, "tenant-a"); err != nil {
+		t.Fatalf("compileKueueState: %v", err)
+	}
+
+	var cq kueuev1beta1.ClusterQueue
+	err := c.Get(context.Background(), client.ObjectKey{Name: "tenant-a-guaranteed"}, &cq)
+	if err == nil {
+		t.Error("CQ should have been deleted after reservation was cancelled")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // triggerPreemption
 // ---------------------------------------------------------------------------
