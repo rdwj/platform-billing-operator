@@ -5,6 +5,7 @@ import (
 	"os"
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
+	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
@@ -31,6 +32,9 @@ func newK8sClient() (ctrlclient.Client, error) {
 	}
 	if err := corev1.AddToScheme(s); err != nil {
 		return nil, fmt.Errorf("adding core scheme: %w", err)
+	}
+	if err := authorizationv1.AddToScheme(s); err != nil {
+		return nil, fmt.Errorf("adding authorization scheme: %w", err)
 	}
 
 	c, err := ctrlclient.New(cfg, ctrlclient.Options{Scheme: s})

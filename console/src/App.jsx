@@ -5,7 +5,7 @@ import { Overview, Models, Tenants, TenantDetail, Plans, UsageExplorer, Billing,
 import { TOverview, TModels, TUsage, TBilling, TBudgets, TKeys, TReservations } from './screens-tenant.jsx';
 import CapacityCalendar from './screens-reservations.jsx';
 import Integrations from './screens-integrations.jsx';
-import { fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport, fetchPlans, fetchPriceBooks, fetchUsage, fetchOverview, fetchConnectors, fetchWebhooks, fetchInvoiceRuns, fetchAdjustmentsAll, fetchHealth, fetchDriftAll, fetchPricing, fetchInvoices, fetchReservations, createReservation, cancelReservation } from './api.js';
+import { fetchSession, fetchTenants, fetchLedger, fetchBudgets, fetchKeys, fetchExport, fetchPlans, fetchPriceBooks, fetchUsage, fetchOverview, fetchConnectors, fetchWebhooks, fetchInvoiceRuns, fetchAdjustmentsAll, fetchHealth, fetchDriftAll, fetchPricing, fetchInvoices, fetchReservations, createReservation, cancelReservation } from './api.js';
 
 function buildTenantDetail(t, credited, frozen) {
   const bal = t.balance ? parseFloat(t.balance) : null;
@@ -93,7 +93,7 @@ const PROVIDER_NAV = [
 ];
 
 const TENANT_NAV = [
-  { hdr: 'Tenant portal' },
+  { hdr: 'Consumer portal' },
   { id: 't-overview', label: 'Overview' }, { id: 't-models', label: 'Model directory' }, { id: 't-usage', label: 'Usage & reports' },
   { hdr: 'Billing' },
   { id: 't-billing', label: 'Balance & billing' }, { id: 't-budgets', label: 'Budgets & alerts' }, { id: 't-keys', label: 'API keys' },
@@ -102,6 +102,7 @@ const TENANT_NAV = [
 ];
 
 export default function App() {
+  const [session, setSession] = useState(null); // {persona, user, tenant} from BFF
   const [persona, setPersona] = useState('provider');
   const [screen, setScreen] = useState('overview');
   const [tScreen, setTScreen] = useState('t-overview');
@@ -113,6 +114,10 @@ export default function App() {
   const [secret, setSecret] = useState(null);
   const [credited, setCredited] = useState({});
   const [frozen, setFrozen] = useState({});
+
+  // Session-driven persona: lock view unless demo user
+  const showToggle = !session || session.persona === 'demo';
+  const effectivePersona = session && session.persona !== 'demo' ? session.persona : persona;
 
   // --- API data layer ---
   const [apiTenants, setApiTenants] = useState(null);
@@ -137,6 +142,13 @@ export default function App() {
   const [apiPortalReservations, setApiPortalReservations] = useState(null);
 
   useEffect(() => {
+    fetchSession().then(data => {
+      if (data && data.persona) {
+        setSession(data);
+        if (data.persona === 'consumer') setPersona('consumer');
+        else if (data.persona === 'provider') setPersona('provider');
+      }
+    });
     fetchTenants().then(data => {
       if (data && data.tenants) setApiTenants(data.tenants);
     });
@@ -179,10 +191,13 @@ export default function App() {
     fetchExport({ tenant: tid, from, to: now.toISOString() }).then(data => { if (data) setApiExport(data); });
   }, [tenant?.tenant_id, tenant?.tid]);
 
-  // Auto-select portal tenant and fetch tenant-specific data for tenant persona
+  // Auto-select portal tenant and fetch tenant-specific data for consumer persona
   useEffect(() => {
-    if (persona !== 'tenant' || !apiTenants || apiTenants.length === 0) return;
-    const first = apiTenants[0];
+    if (effectivePersona === 'provider' || !apiTenants || apiTenants.length === 0) return;
+    // Use session tenant if available, otherwise fall back to first tenant
+    const sessionTid = session && session.tenant;
+    const match = sessionTid ? apiTenants.find(t => t.tenant_id === sessionTid || t.name === sessionTid) : null;
+    const first = match || apiTenants[0];
     setTenant(first);
     const tid = first.tenant_id;
     fetchPricing(tid).then(data => { if (data) setApiPortalPricing(data); });
@@ -191,9 +206,9 @@ export default function App() {
     const from14 = new Date(now.getTime() - 14 * 86400000).toISOString();
     fetchUsage({ tenant: tid, from: from14, to: now.toISOString(), bucket: 'day' }).then(data => { if (data) setApiPortalUsage(data); });
     fetchReservations(tid).then(data => { if (data) setApiPortalReservations(data); });
-  }, [persona, apiTenants]);
+  }, [effectivePersona, apiTenants, session]);
 
-  const prov = persona === 'provider';
+  const prov = effectivePersona === 'provider';
   const nav = prov ? PROVIDER_NAV : TENANT_NAV;
   const active = prov ? screen : tScreen;
 
@@ -273,12 +288,12 @@ export default function App() {
           Redwoods University&nbsp;&nbsp;<span style={{ color: '#8a8d90', fontWeight: 400 }}>MaaS FinOps Console</span>
         </div>
         <div style={{ flex: 1 }} />
-        <div style={{ display: 'flex', background: '#2b2e33', borderRadius: 16, padding: 3, gap: 2 }}>
+        {showToggle && <div style={{ display: 'flex', background: '#2b2e33', borderRadius: 16, padding: 3, gap: 2 }}>
           <div onClick={() => setPersona('provider')} style={pill(prov)}>Provider</div>
-          <div onClick={() => setPersona('tenant')} style={pill(!prov)}>Tenant portal</div>
-        </div>
+          <div onClick={() => setPersona('consumer')} style={pill(!prov)}>Consumer</div>
+        </div>}
         <div style={{ fontSize: 12, color: '#d2d2d2', border: '1px solid #4d4d4d', borderRadius: 12, padding: '3px 12px' }}>
-          {!prov && th ? `${th.name} · tenant workspace` : 'production'}
+          {!prov && th ? `${th.name} · consumer workspace` : 'production'}
         </div>
         <div style={{ width: 30, height: 30, borderRadius: '50%', background: '#0066CC', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700 }}>MG</div>
       </div>
@@ -323,7 +338,7 @@ export default function App() {
             {!prov && th && tScreen === 't-budgets' && <TBudgets apiBudgets={apiBudgets} />}
             {!prov && th && tScreen === 't-keys' && <TKeys keys={portalKeys.concat(extraKeys)} createKey={createKey} secret={secret} dismiss={() => setSecret(null)} />}
             {!prov && th && tScreen === 't-reservations' && <TReservations reservations={portalReservations} onCreateReservation={handleCreateReservation} onCancelReservation={handleCancelReservation} />}
-            {!prov && !th && <div style={{ padding: '40px 0', textAlign: 'center', color: '#6a6e73' }}>Loading tenant portal...</div>}
+            {!prov && !th && <div style={{ padding: '40px 0', textAlign: 'center', color: '#6a6e73' }}>Loading consumer portal...</div>}
           </div>
         </div>
       </div>

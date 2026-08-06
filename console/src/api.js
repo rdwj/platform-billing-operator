@@ -28,6 +28,10 @@ async function postJSON(url, body) {
   }
 }
 
+export function fetchSession() {
+  return fetchJSON('/api/session');
+}
+
 export function fetchTenants() {
   return fetchJSON('/api/tenants');
 }

@@ -91,11 +91,16 @@ func main() {
 		mux.Handle("/api/walkthroughs/", auth.Middleware(wtRoutes))
 		log.Printf("walkthroughs loaded: %d definitions", len(defs))
 
+		// Session endpoint: RBAC persona probing (no provider role guard)
+		demoUser := os.Getenv("CONSOLE_DEMO_USER")
+		lister := authn.NewK8sTenantLister(k8sClient, operatorNS)
+		resolver := authn.NewTenantResolver(lister)
+		sessionHandler := authn.NewSessionHandler(k8sClient, resolver, operatorNS, demoUser)
+		mux.Handle("/api/session", auth.Middleware(sessionHandler))
+
 		// Tenant portal routes
 		tenantPortalEnabled := os.Getenv("TENANT_PORTAL_ENABLED")
 		if tenantPortalEnabled != "false" && authMode != "" {
-			lister := authn.NewK8sTenantLister(k8sClient, operatorNS)
-			resolver := authn.NewTenantResolver(lister)
 			tenantMW := authn.TenantMiddleware(resolver)
 
 			portalProxy := &httputil.ReverseProxy{

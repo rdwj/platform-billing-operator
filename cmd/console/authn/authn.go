@@ -17,14 +17,19 @@ const (
 	RoleAdmin    = "admin"
 	RoleOperator = "operator"
 	RoleViewer   = "viewer"
+
+	PersonaProvider = "provider"
+	PersonaConsumer = "consumer"
+	PersonaDemo     = "demo"
 )
 
 type contextKey struct{}
 
 type ConsoleIdentity struct {
-	User   string
-	Groups []string
-	Role   string // RoleAdmin, RoleOperator, RoleViewer, or ""
+	User    string
+	Groups  []string
+	Role    string // RoleAdmin, RoleOperator, RoleViewer, or ""
+	Persona string // PersonaProvider, PersonaConsumer, PersonaDemo, or ""
 }
 
 type RoleConfig struct {

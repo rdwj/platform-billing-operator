@@ -1,0 +1,12 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: billing-consumer
+rules:
+- apiGroups:
+  - billing.opendatahub.io
+  resources:
+  - tenantaccounts
+  verbs:
+  - get
