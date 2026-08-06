@@ -1,6 +1,8 @@
 package metrics
 
 import (
+	"strconv"
+
 	"github.com/prometheus/client_golang/prometheus"
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
@@ -120,6 +122,18 @@ var (
 		[]string{labelTenantID, "sku", "currency"},
 	)
 )
+
+// AddCount increments a counter by an integer count.
+func AddCount(c prometheus.Counter, n int) {
+	c.Add(float64(n))
+}
+
+// AddDecimalAmount increments a labeled counter by a decimal string value.
+func AddDecimalAmount(cv *prometheus.CounterVec, labels []string, decimalStr string) {
+	if v, err := strconv.ParseFloat(decimalStr, 64); err == nil {
+		cv.WithLabelValues(labels...).Add(v)
+	}
+}
 
 func init() {
 	crmetrics.Registry.MustRegister(

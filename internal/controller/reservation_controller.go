@@ -130,7 +130,7 @@ func (r *ReservationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 // reservation. Returns a ctrl.Result pointer if the reconcile should return
 // early (capacity insufficient), or nil if the reservation was confirmed and
 // the caller should continue with the normal state-transition flow.
-func (r *ReservationReconciler) handleRequested(ctx context.Context, res *billingv1alpha1.Reservation, now time.Time) (*ctrl.Result, error) {
+func (r *ReservationReconciler) handleRequested(ctx context.Context, res *billingv1alpha1.Reservation, _ time.Time) (*ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	var nodeList corev1.NodeList
@@ -229,12 +229,12 @@ func (r *ReservationReconciler) geoLabel() string {
 func (r *ReservationReconciler) requeueResult(res *billingv1alpha1.Reservation, now time.Time) ctrl.Result {
 	switch res.Status.State {
 	case billingv1alpha1.ReservationStateConfirmed:
-		if d := res.Spec.Window.Start.Time.Sub(now); d > 0 {
+		if d := res.Spec.Window.Start.Sub(now); d > 0 {
 			return ctrl.Result{RequeueAfter: d}
 		}
 		return ctrl.Result{Requeue: true}
 	case billingv1alpha1.ReservationStateActive:
-		if d := res.Spec.Window.End.Time.Sub(now); d > 0 {
+		if d := res.Spec.Window.End.Sub(now); d > 0 {
 			return ctrl.Result{RequeueAfter: d}
 		}
 		return ctrl.Result{Requeue: true}

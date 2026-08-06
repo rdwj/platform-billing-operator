@@ -24,7 +24,10 @@ func sarClient(t *testing.T, allowed bool, sarErr error) ctrlclient.Client {
 	return fake.NewClientBuilder().
 		WithScheme(scheme).
 		WithInterceptorFuncs(interceptor.Funcs{
-			Create: func(ctx context.Context, client ctrlclient.WithWatch, obj ctrlclient.Object, opts ...ctrlclient.CreateOption) error {
+			Create: func(
+				ctx context.Context, client ctrlclient.WithWatch,
+				obj ctrlclient.Object, opts ...ctrlclient.CreateOption,
+			) error {
 				if sarErr != nil {
 					return sarErr
 				}

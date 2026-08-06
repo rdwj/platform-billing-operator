@@ -76,7 +76,10 @@ func newUUID() string {
 	return fmt.Sprintf("%x-%x-%x-%x-%x", buf[0:4], buf[4:6], buf[6:8], buf[8:10], buf[10:16])
 }
 
-func GatewayRequest(ctx context.Context, client *http.Client, cfg *config, tenant tenantToken, stream bool) (time.Duration, error) {
+func GatewayRequest(
+	ctx context.Context, client *http.Client, cfg *config,
+	tenant tenantToken, stream bool,
+) (time.Duration, error) {
 	reqBody := chatRequest{
 		Model:     cfg.model,
 		Messages:  []chatMessage{{Role: "user", Content: cfg.prompt}},

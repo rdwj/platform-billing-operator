@@ -32,6 +32,8 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make test
+      - name: Coverage gate
+        run: make coverage-check
 
   money-safety:
     name: Money Safety Gate

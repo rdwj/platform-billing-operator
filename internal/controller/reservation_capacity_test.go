@@ -51,7 +51,7 @@ func fakeGPUNode(name, sku, geo string, allocatable int64, labels map[string]str
 }
 
 // fakeReservation builds a billingv1alpha1.Reservation with the given state.
-func fakeReservation(name, tenant, sku, geo, class, state string, count int32) billingv1alpha1.Reservation {
+func fakeReservation(name, tenant, sku, geo, class, state string, count int32) billingv1alpha1.Reservation { //nolint:unparam
 	return billingv1alpha1.Reservation{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,

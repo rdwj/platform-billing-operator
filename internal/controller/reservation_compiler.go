@@ -49,11 +49,6 @@ func compileKueueState(ctx context.Context, c client.Client, tenantRef string) e
 		return fmt.Errorf("listing reservations: %w", err)
 	}
 
-	type skuQuota struct {
-		sku   string
-		count int32
-	}
-
 	// Per-class accumulation. Currently assumes one SKU+geo per tenant per class.
 	// Multi-SKU support would require one CQ per (tenant, class, SKU).
 	guaranteed := make(map[string]int32) // sku -> total count
@@ -135,7 +130,7 @@ func compileKueueState(ctx context.Context, c client.Client, tenantRef string) e
 	return nil
 }
 
-func ensureClusterQueue(ctx context.Context, c client.Client, name string, labels map[string]string, flavorName, sku, geo string, quota int32, class string) error {
+func ensureClusterQueue(ctx context.Context, c client.Client, name string, labels map[string]string, flavorName, sku, geo string, quota int32, _ string) error {
 	desiredQuota := resource.MustParse(fmt.Sprintf("%d", quota))
 	var existing kueuev1beta1.ClusterQueue
 	err := c.Get(ctx, client.ObjectKey{Name: name}, &existing)

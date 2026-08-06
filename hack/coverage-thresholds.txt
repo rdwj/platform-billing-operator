@@ -1,0 +1,10 @@
+# Per-package coverage thresholds. Format: package_suffix minimum_pct
+# Packages not listed here are not checked.
+# Update thresholds when coverage improves; never lower them.
+cmd/console/authn 79
+cmd/console/walkthroughs 73
+internal/controller 61
+internal/enforcement 81
+internal/rater 87
+internal/reservation/charging 86
+internal/psp 79

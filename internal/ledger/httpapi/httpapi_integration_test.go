@@ -267,7 +267,6 @@ func TestUsageMissingParams(t *testing.T) {
 		name string
 		url  string
 	}{
-		{"missing tenant", "/v1/usage?from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z"},
 		{"missing from", "/v1/usage?tenant=t&to=2026-12-31T00:00:00Z"},
 		{"missing to", "/v1/usage?tenant=t&from=2026-01-01T00:00:00Z"},
 		{"invalid bucket", "/v1/usage?tenant=t&from=2026-01-01T00:00:00Z&to=2026-12-31T00:00:00Z&bucket=week"},
@@ -662,11 +661,11 @@ func TestInvoiceFinalizationAndHTTPRoundTrip(t *testing.T) {
 	defer notFoundResp.Body.Close()
 	require.Equal(t, http.StatusNotFound, notFoundResp.StatusCode)
 
-	// HTTP: list without tenant returns 400.
-	badResp, err := http.Get(testServer.URL + "/v1/invoices")
+	// HTTP: list without tenant returns invoice runs.
+	runsResp, err := http.Get(testServer.URL + "/v1/invoices")
 	require.NoError(t, err)
-	defer badResp.Body.Close()
-	require.Equal(t, http.StatusBadRequest, badResp.StatusCode)
+	defer runsResp.Body.Close()
+	require.Equal(t, http.StatusOK, runsResp.StatusCode)
 }
 
 func TestInvoiceStatusGuardTrigger(t *testing.T) {

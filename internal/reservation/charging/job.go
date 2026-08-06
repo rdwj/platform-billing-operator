@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -94,7 +93,7 @@ func (j *Job) Tick(ctx context.Context) (int, error) {
 	}
 
 	if charged > 0 {
-		metrics.ReservationChargesTotal.Add(float64(charged))
+		metrics.AddCount(metrics.ReservationChargesTotal, charged)
 		j.log.Info("reservation charges emitted", "count", charged)
 	}
 	return charged, nil
@@ -131,9 +130,9 @@ func (j *Job) chargeAllPeriods(ctx context.Context, res *billingv1alpha1.Reserva
 				res.Name, periodKey(period), err)
 		}
 
-		if amt, err := strconv.ParseFloat(amount.StringFixed(moneyPlaces), 64); err == nil {
-			metrics.ReservationChargeAmountTotal.WithLabelValues(res.Spec.TenantRef, res.Spec.SKU, "USD").Add(amt)
-		}
+		metrics.AddDecimalAmount(metrics.ReservationChargeAmountTotal,
+			[]string{res.Spec.TenantRef, res.Spec.SKU, "USD"},
+			amount.StringFixed(moneyPlaces))
 		charged++
 	}
 	return charged, nil
@@ -156,7 +155,7 @@ func billingPeriods(windowStart, now time.Time) []time.Time {
 }
 
 // isChargeable returns true if the reservation should be charged.
-func isChargeable(res *billingv1alpha1.Reservation, now time.Time) bool {
+func isChargeable(res *billingv1alpha1.Reservation, _ time.Time) bool {
 	if res.Spec.Class != billingv1alpha1.ReservationClassGuaranteed {
 		return false
 	}
@@ -186,8 +185,8 @@ func computePeriodCharge(res *billingv1alpha1.Reservation, periodRef time.Time) 
 	monthEnd := monthStart.AddDate(0, 1, 0)
 	daysInMonth := calendarDays(monthStart, monthEnd)
 
-	winStart := res.Spec.Window.Start.Time.UTC()
-	winEnd := res.Spec.Window.End.Time.UTC()
+	winStart := res.Spec.Window.Start.UTC()
+	winEnd := res.Spec.Window.End.UTC()
 
 	periodStart := monthStart
 	if winStart.After(monthStart) {
@@ -201,7 +200,7 @@ func computePeriodCharge(res *billingv1alpha1.Reservation, periodRef time.Time) 
 	// Pro-rate for cancellation: clamp periodEnd to the cancellation
 	// timestamp so we only charge for days before cancellation.
 	if res.Status.CancelledAt != nil {
-		cancelledAt := res.Status.CancelledAt.Time.UTC()
+		cancelledAt := res.Status.CancelledAt.UTC()
 		if cancelledAt.Before(periodEnd) {
 			periodEnd = cancelledAt
 		}

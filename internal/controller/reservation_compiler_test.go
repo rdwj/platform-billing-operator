@@ -46,7 +46,7 @@ func compilerTestScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
-func testResourceFlavor(name, gpuProduct string) *kueuev1beta1.ResourceFlavor {
+func testResourceFlavor(name, gpuProduct string) *kueuev1beta1.ResourceFlavor { //nolint:unparam
 	return &kueuev1beta1.ResourceFlavor{
 		ObjectMeta: metav1.ObjectMeta{Name: name},
 		Spec: kueuev1beta1.ResourceFlavorSpec{
@@ -57,7 +57,7 @@ func testResourceFlavor(name, gpuProduct string) *kueuev1beta1.ResourceFlavor {
 	}
 }
 
-func testReservation(name, ns, tenant, sku, geo, class, state string, count int32) *billingv1alpha1.Reservation {
+func testReservation(name, ns, tenant, sku, geo, class, state string, count int32) *billingv1alpha1.Reservation { //nolint:unparam
 	return &billingv1alpha1.Reservation{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
 		Spec: billingv1alpha1.ReservationSpec{

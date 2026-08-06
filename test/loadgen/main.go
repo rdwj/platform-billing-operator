@@ -47,7 +47,8 @@ func main() {
 	flag.StringVar(&cfg.url, "url", "", "target URL (required)")
 	flag.StringVar(&cfg.token, "token", "", "bearer token (gateway mode, single tenant)")
 	var tokensFlag string
-	flag.StringVar(&tokensFlag, "tokens", "", "comma-separated tenant_id:token:key_id entries for multi-tenant round-robin")
+	flag.StringVar(&tokensFlag, "tokens", "",
+		"comma-separated tenant_id:token:key_id entries for multi-tenant round-robin")
 	flag.IntVar(&cfg.concurrency, "concurrency", 10, "concurrent workers")
 	flag.DurationVar(&cfg.duration, "duration", 60*time.Second, "test duration")
 	flag.StringVar(&cfg.model, "model", "/mnt/models", "model name")
@@ -153,7 +154,11 @@ func main() {
 	printReport(&cfg, collected)
 }
 
-func worker(ctx context.Context, client *http.Client, cfg *config, tenants []tenantToken, counter *atomic.Uint64, out chan<- result, ticker *time.Ticker) {
+func worker(
+	ctx context.Context, client *http.Client, cfg *config,
+	tenants []tenantToken, counter *atomic.Uint64,
+	out chan<- result, ticker *time.Ticker,
+) {
 	for {
 		if ctx.Err() != nil {
 			return

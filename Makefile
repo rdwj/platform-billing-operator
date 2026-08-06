@@ -112,6 +112,10 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
+.PHONY: coverage-check
+coverage-check: ## Check per-package coverage against thresholds.
+	@hack/check-coverage.sh cover.out hack/coverage-thresholds.txt
+
 .PHONY: test-integration
 test-integration: ## Run integration tests (requires Docker/Podman for testcontainers).
 	TESTCONTAINERS_RYUK_DISABLED=true go test -tags=integration -v -count=1 ./internal/ledger/...
@@ -186,7 +190,7 @@ billctl: ## Build billctl CLI.
 
 .PHONY: console
 console: fmt vet ## Build console BFF binary (requires console/dist/ from console-build).
-	go build -o bin/console ./cmd/console/
+	go build -tags=console_embed -o bin/console ./cmd/console/
 
 .PHONY: console-build
 console-build: ## Build console SPA (output in console/dist/).

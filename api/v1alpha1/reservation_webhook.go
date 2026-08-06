@@ -51,11 +51,10 @@ func (v *ReservationValidator) ValidateCreate(_ context.Context, obj runtime.Obj
 		return nil, fmt.Errorf("expected Reservation, got %T", obj)
 	}
 
-	var allErrs field.ErrorList
-	allErrs = append(allErrs, validateReservationSpec(r)...)
+	allErrs := validateReservationSpec(r)
 
 	// On create, window.start must be in the future.
-	if !r.Spec.Window.Start.Time.After(time.Now()) {
+	if !r.Spec.Window.Start.After(time.Now()) {
 		allErrs = append(allErrs, field.Invalid(
 			field.NewPath("spec", "window", "start"),
 			r.Spec.Window.Start.Format(time.RFC3339),
@@ -79,8 +78,7 @@ func (v *ReservationValidator) ValidateUpdate(_ context.Context, _, newObj runti
 		return nil, fmt.Errorf("expected Reservation for newObj, got %T", newObj)
 	}
 
-	var allErrs field.ErrorList
-	allErrs = append(allErrs, validateReservationSpec(r)...)
+	allErrs := validateReservationSpec(r)
 
 	if len(allErrs) > 0 {
 		return nil, apierrors.NewInvalid(

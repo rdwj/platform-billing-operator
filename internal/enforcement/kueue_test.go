@@ -69,7 +69,7 @@ func gpuTenantAccount(freezeMode string) *billingv1alpha1.TenantAccount {
 	}
 }
 
-func gpuClusterQueue(tenantName string, gpuQuota string, stopPolicy *kueuev1beta1.StopPolicy) *kueuev1beta1.ClusterQueue {
+func gpuClusterQueue(tenantName string, gpuQuota string, stopPolicy *kueuev1beta1.StopPolicy) *kueuev1beta1.ClusterQueue { //nolint:unparam
 	return &kueuev1beta1.ClusterQueue{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: fmt.Sprintf("cq-%s", tenantName),
@@ -96,7 +96,8 @@ func gpuClusterQueue(tenantName string, gpuQuota string, stopPolicy *kueuev1beta
 func newKueueTestBackend(t *testing.T, plan *billingv1alpha1.Plan, objs ...client.Object) (*KueueBackend, client.Client) {
 	t.Helper()
 	s := kueueTestScheme(t)
-	allObjs := []client.Object{plan}
+	allObjs := make([]client.Object, 0, 1+len(objs))
+	allObjs = append(allObjs, plan)
 	allObjs = append(allObjs, objs...)
 	c := fake.NewClientBuilder().
 		WithScheme(s).

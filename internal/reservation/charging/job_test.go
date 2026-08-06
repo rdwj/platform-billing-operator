@@ -61,7 +61,7 @@ func newScheme(t *testing.T) *runtime.Scheme {
 	return s
 }
 
-func makeReservation(name, tenant, sku string, count int32, class, state string,
+func makeReservation(name, tenant, sku string, count int32, class, state string, //nolint:unparam
 	start, end time.Time, monthlyPrice string) *billingv1alpha1.Reservation {
 	return &billingv1alpha1.Reservation{
 		ObjectMeta: metav1.ObjectMeta{
