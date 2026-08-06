@@ -135,19 +135,18 @@ func TestContentHashNotNull(t *testing.T) {
 		"error should reference the content_hash column")
 }
 
-// TestChargesRecordIdForeignKey verifies the FK from charges.record_id
-// to usage_events.record_id — rated events must be traceable to source.
-func TestChargesRecordIdForeignKey(t *testing.T) {
+// TestChargesNoRecordIdFK verifies that migration 0012 dropped the FK from
+// charges.record_id to usage_events — reservation charges use synthetic
+// record_ids that don't exist in usage_events.
+func TestChargesNoRecordIdFK(t *testing.T) {
 	ctx := context.Background()
 	_, err := testPool.Exec(ctx, `
 		INSERT INTO charges
 			(record_id, tenant_id, price_book, price_book_rev,
-			 amount, currency, components, rated_at)
-		VALUES ('nonexistent-event-fk-test', 'ten-test', 'pb', 1,
-			1.000000, 'USD', '[]', now())`)
-	require.Error(t, err, "charges FK should reject record_id not in usage_events")
-	require.Contains(t, err.Error(), "charges_record_id_fkey",
-		"error should reference the charges FK constraint")
+			 amount, currency, components, rated_at, source)
+		VALUES ('nonexistent-event-no-fk', 'ten-test', 'pb', 1,
+			1.000000, 'USD', '[]', now(), 'reservation')`)
+	require.NoError(t, err, "insert with non-existent record_id should succeed after FK drop")
 }
 
 // TestDriftReportsSignatureColumn verifies the signature column exists
