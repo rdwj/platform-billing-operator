@@ -9,6 +9,7 @@ resources:
 - bases/billing.opendatahub.io_pricebooks.yaml
 - bases/billing.opendatahub.io_tenantaccounts.yaml
 - bases/billing.opendatahub.io_reservations.yaml
+- bases/billing.opendatahub.io_billingconsoles.yaml
 
 # [WEBHOOK] To enable webhook, uncomment all the sections with [WEBHOOK] prefix.
 # patches here are for enabling the conversion webhook for each CRD

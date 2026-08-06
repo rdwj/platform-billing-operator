@@ -154,17 +154,13 @@ func TestCompileKueueState_PreemptibleCQCreated(t *testing.T) {
 	if got := cqGPUQuota(cq); got != 2 {
 		t.Errorf("GPU quota = %d, want 2", got)
 	}
-	// Preemptible CQs should have BorrowingLimit = 0.
+	// BorrowingLimit is omitted (standalone CQ can't borrow; Kueue rejects
+	// BorrowingLimit on CQs without a cohort). Verify it is nil.
 	for _, rg := range cq.Spec.ResourceGroups {
 		for _, f := range rg.Flavors {
 			for _, r := range f.Resources {
-				if r.Name == gpuResourceKey {
-					if r.BorrowingLimit == nil {
-						t.Fatal("BorrowingLimit is nil, want 0")
-					}
-					if r.BorrowingLimit.Value() != 0 {
-						t.Errorf("BorrowingLimit = %d, want 0", r.BorrowingLimit.Value())
-					}
+				if r.Name == gpuResourceKey && r.BorrowingLimit != nil {
+					t.Errorf("BorrowingLimit = %d, want nil (no cohort)", r.BorrowingLimit.Value())
 				}
 			}
 		}

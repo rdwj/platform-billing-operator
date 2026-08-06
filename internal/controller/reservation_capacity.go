@@ -45,29 +45,29 @@ type capacityKey struct {
 // across the cluster. It is built from pre-fetched node and reservation lists
 // so that the caller controls when and how k8s objects are listed.
 type CapacitySnapshot struct {
-	NodeCapacity map[capacityKey]int32
-	Reserved     map[capacityKey]int32
+	NodeCapacity      map[capacityKey]int32
+	GuaranteedReserve map[capacityKey]int32
 }
 
 // BuildCapacitySnapshot constructs a CapacitySnapshot from the provided nodes
 // and reservations. Only nodes with the nvidia.com/gpu.product label are
-// considered. Only reservations in the Confirmed or Active state count toward
-// reserved capacity. If geoLabel is empty, topology.kubernetes.io/region is
-// used.
+// considered. Only Guaranteed reservations in the Confirmed or Active state
+// count toward reserved capacity — Preemptible reservations are excluded
+// because Guaranteed demand can displace them. If geoLabel is empty,
+// topology.kubernetes.io/region is used.
 func BuildCapacitySnapshot(nodes []corev1.Node, reservations []billingv1alpha1.Reservation, geoLabel string) *CapacitySnapshot {
 	if geoLabel == "" {
 		geoLabel = defaultGeoLabel
 	}
 
 	snap := &CapacitySnapshot{
-		NodeCapacity: make(map[capacityKey]int32),
-		Reserved:     make(map[capacityKey]int32),
+		NodeCapacity:      make(map[capacityKey]int32),
+		GuaranteedReserve: make(map[capacityKey]int32),
 	}
 
 	for _, node := range nodes {
 		sku := nodeSKU(node)
 		if sku == "" {
-			// Not a GPU node (no nvidia.com/gpu.product label).
 			continue
 		}
 		cap := nodeGPUCapacity(node)
@@ -78,19 +78,24 @@ func BuildCapacitySnapshot(nodes []corev1.Node, reservations []billingv1alpha1.R
 	for _, res := range reservations {
 		switch res.Status.State {
 		case billingv1alpha1.ReservationStateConfirmed, billingv1alpha1.ReservationStateActive:
+		default:
+			continue
+		}
+		if res.Spec.Class == billingv1alpha1.ReservationClassGuaranteed {
 			key := capacityKey{SKU: res.Spec.SKU, Geo: res.Spec.Geo}
-			snap.Reserved[key] += res.Spec.Count
+			snap.GuaranteedReserve[key] += res.Spec.Count
 		}
 	}
 
 	return snap
 }
 
-// Available returns the unreserved GPU count for a given SKU and geo. The
-// result can be negative when reservations exceed node capacity (over-reserved).
+// Available returns the unreserved GPU count for a given SKU and geo.
+// Only Guaranteed reservations consume capacity — Preemptible reservations
+// can be displaced and don't block new Guaranteed confirmations.
 func (s *CapacitySnapshot) Available(sku, geo string) int32 {
 	key := capacityKey{SKU: sku, Geo: geo}
-	return s.NodeCapacity[key] - s.Reserved[key]
+	return s.NodeCapacity[key] - s.GuaranteedReserve[key]
 }
 
 // nodeGPUCapacity returns the GPU count for a node. It prefers the allocatable

@@ -150,22 +150,23 @@ func ensureClusterQueue(ctx context.Context, c client.Client, name string, label
 				Annotations: map[string]string{annotationSKU: sku, annotationGeo: geo},
 			},
 			Spec: kueuev1beta1.ClusterQueueSpec{
+				NamespaceSelector: &metav1.LabelSelector{},
 				ResourceGroups: []kueuev1beta1.ResourceGroup{{
-					CoveredResources: []corev1.ResourceName{gpuResourceKey},
+					CoveredResources: []corev1.ResourceName{"cpu", "memory", gpuResourceKey},
 					Flavors: []kueuev1beta1.FlavorQuotas{{
 						Name: kueuev1beta1.ResourceFlavorReference(flavorName),
-						Resources: []kueuev1beta1.ResourceQuota{{
-							Name:         gpuResourceKey,
-							NominalQuota: desiredQuota,
-						}},
+						Resources: []kueuev1beta1.ResourceQuota{
+							{Name: "cpu", NominalQuota: resource.MustParse("8")},
+							{Name: "memory", NominalQuota: resource.MustParse("32Gi")},
+							{Name: gpuResourceKey, NominalQuota: desiredQuota},
+						},
 					}},
 				}},
 			},
 		}
-		if class == billingv1alpha1.ReservationClassPreemptible {
-			zero := resource.MustParse("0")
-			cq.Spec.ResourceGroups[0].Flavors[0].Resources[0].BorrowingLimit = &zero
-		}
+		// BorrowingLimit=0 is only valid when the CQ is in a cohort.
+		// Without a cohort, Kueue rejects it. Omit for now — a standalone
+		// CQ can't borrow regardless.
 		return c.Create(ctx, cq)
 	}
 

@@ -165,7 +165,7 @@ func TestCapacitySnapshot_Available(t *testing.T) {
 		NodeCapacity: map[capacityKey]int32{
 			{SKU: "h200", Geo: "us-east"}: 4,
 		},
-		Reserved: map[capacityKey]int32{
+		GuaranteedReserve: map[capacityKey]int32{
 			{SKU: "h200", Geo: "us-east"}: 6,
 		},
 	}
