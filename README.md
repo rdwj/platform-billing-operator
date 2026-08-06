@@ -1,8 +1,8 @@
 # platform-billing-operator
 
-A Kubernetes operator that compiles billing Plans into Kuadrant enforcement policies (TokenRateLimitPolicy, RateLimitPolicy, AuthPolicy) on a Gateway API gateway. Part of the "X as a Business" billing and metering layer for OpenShift AI.
+A Kubernetes operator that adds billing, metering, and FinOps to OpenShift AI's Models-as-a-Service. It compiles billing Plans into Kuadrant enforcement policies, meters per-request token usage, manages prepaid wallets with automatic balance enforcement, integrates with payment processors (Stripe), and provides a billing console for providers and tenants.
 
-See [docs/getting-started.md](docs/getting-started.md) for prerequisites, installation, and usage.
+For a full walkthrough, see [Getting Started](docs/getting-started.md). For how the components fit together, see [Architecture](docs/architecture.md). For CRD field details, see [API Reference](docs/api-reference.md).
 
 ## Quick start (local development)
 
@@ -18,12 +18,24 @@ make deploy IMG=controller:latest
 make demo-m0
 ```
 
+## Install via OLM
+
+```bash
+operator-sdk olm install
+operator-sdk run bundle quay.io/rdwj/platform-billing-operator-bundle:v0.0.1
+```
+
 ## CRDs
 
-| CRD | Purpose |
-|-----|---------|
-| `PriceBook` | SKU pricing catalog with immutability after effectiveFrom |
-| `Plan` | Rate limits and model-scope access, compiled to Kuadrant CRs |
+| CRD | Scope | Purpose |
+|-----|-------|---------|
+| `PriceBook` | Namespaced | SKU pricing catalog with immutability after effectiveFrom |
+| `Plan` | Namespaced | Rate limits and model-scope access, compiled to Kuadrant CRs |
+| `TenantAccount` | Namespaced | Billing tenant with wallet, billing mode, and lifecycle state machine |
+| `BillingConnector` | Namespaced | Payment service provider integration (Stripe, generic webhook) |
+| `BudgetPolicy` | Namespaced | Spending caps with threshold-based actions (Notify, Throttle, Freeze) |
+| `BillingConsole` | Cluster | Operator-managed billing console UI deployment (singleton) |
+| `Reservation` | Namespaced | GPU committed-use reservations with calendar windows |
 
 ## Contributing
 

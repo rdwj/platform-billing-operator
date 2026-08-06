@@ -45,7 +45,7 @@ type SKU struct {
 	// +kubebuilder:validation:Required
 	SKUName string `json:"sku"`
 
-	// Unit is the pricing unit (e.g. "per-1M-tokens", "per-gpu-hour").
+	// Unit is the pricing unit (e.g. "per-1M-tokens", "per-gpu-second").
 	// +kubebuilder:validation:Required
 	Unit string `json:"unit"`
 
