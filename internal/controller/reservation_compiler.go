@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/shopspring/decimal"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
@@ -34,13 +35,30 @@ import (
 )
 
 const (
-	labelReservationClass = "billing.opendatahub.io/reservation-class"
-	managedByReservation  = "reservation-controller"
-	labelTenant           = "billing.opendatahub.io/tenant-id"
-	annotationSKU         = "billing.opendatahub.io/reservation-sku"
-	annotationGeo         = "billing.opendatahub.io/reservation-geo"
-	gpuResourceKey        = corev1.ResourceName("nvidia.com/gpu")
+	labelReservationClass    = "billing.opendatahub.io/reservation-class"
+	managedByReservation     = "reservation-controller"
+	labelTenant              = "billing.opendatahub.io/tenant-id"
+	annotationSKU            = "billing.opendatahub.io/reservation-sku"
+	annotationGeo            = "billing.opendatahub.io/reservation-geo"
+	gpuResourceKey           = corev1.ResourceName("nvidia.com/gpu")
+	AnnotationEvictionReason = "billing.opendatahub.io/eviction-reason"
 )
+
+// EvictionInfo describes a single workload evicted by the billing controller.
+type EvictionInfo struct {
+	WorkloadUID string
+	TenantID    string
+	GPUCount    int64
+	RuntimeSecs float64
+}
+
+// EvictionCredit is a computed credit to post to the ledger for an evicted workload.
+type EvictionCredit struct {
+	TenantID    string
+	Amount      string
+	WorkloadUID string
+	RuntimeSecs float64
+}
 
 // compileKueueState ensures Kueue ClusterQueues reflect the active reservations
 // for a tenant. It creates or updates CQs for Guaranteed and Preemptible classes,
@@ -218,7 +236,7 @@ func findFlavorForSKU(ctx context.Context, c client.Client, sku string) (string,
 // selectively evicts workloads that have exceeded their minimum allocation time.
 // Workloads within their minimum allocation floor are left running.
 // When Guaranteed demand drops below capacity, StopPolicy is cleared.
-func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node, reservations []billingv1alpha1.Reservation, geoLabel string, now time.Time) error {
+func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node, reservations []billingv1alpha1.Reservation, geoLabel string, now time.Time) ([]EvictionCredit, error) {
 	guaranteedDemand := make(map[capacityKey]int32)
 	nodeCapacity := make(map[capacityKey]int32)
 
@@ -235,10 +253,11 @@ func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node
 		nodeCapacity[key] += nodeGPUCapacity(node)
 	}
 
-	// Build per-tenant min-allocation floor from active Preemptible reservations.
-	// When multiple Preemptible reservations exist for a tenant, use the maximum
-	// minAllocationSeconds (most protective for the tenant).
+	// Build per-tenant min-allocation floor and credit rate from active
+	// Preemptible reservations. When multiple exist for a tenant, use
+	// the maximum of each (most protective/generous for the tenant).
 	tenantMinAlloc := make(map[string]int32)
+	tenantCreditRate := make(map[string]decimal.Decimal)
 	for _, res := range reservations {
 		switch res.Status.State {
 		case billingv1alpha1.ReservationStateConfirmed, billingv1alpha1.ReservationStateActive:
@@ -257,6 +276,14 @@ func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node
 			if minAlloc > tenantMinAlloc[res.Spec.TenantRef] {
 				tenantMinAlloc[res.Spec.TenantRef] = minAlloc
 			}
+			if res.Spec.EvictionCreditPerGpuSecond != nil {
+				rate, err := decimal.NewFromString(*res.Spec.EvictionCreditPerGpuSecond)
+				if err == nil {
+					if existing, ok := tenantCreditRate[res.Spec.TenantRef]; !ok || rate.GreaterThan(existing) {
+						tenantCreditRate[res.Spec.TenantRef] = rate
+					}
+				}
+			}
 		}
 	}
 
@@ -272,8 +299,10 @@ func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node
 		labelManagedBy:        managedByReservation,
 		labelReservationClass: billingv1alpha1.ReservationClassPreemptible,
 	}); err != nil {
-		return fmt.Errorf("listing preemptible CQs: %w", err)
+		return nil, fmt.Errorf("listing preemptible CQs: %w", err)
 	}
+
+	var credits []EvictionCredit
 
 	for i := range preemptibleCQs.Items {
 		cq := &preemptibleCQs.Items[i]
@@ -290,15 +319,30 @@ func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node
 			if cq.Spec.StopPolicy == nil || *cq.Spec.StopPolicy != hold {
 				cq.Spec.StopPolicy = &hold
 				if err := c.Update(ctx, cq); err != nil {
-					return fmt.Errorf("holding preemptible CQ %s: %w", cq.Name, err)
+					return credits, fmt.Errorf("holding preemptible CQ %s: %w", cq.Name, err)
 				}
 			}
 
 			// Selectively evict workloads past their minimum allocation floor.
 			tenant := cq.Labels[labelTenant]
 			minAlloc := tenantMinAlloc[tenant]
-			if err := evictPastFloor(ctx, c, cq.Name, minAlloc, now); err != nil {
-				return fmt.Errorf("evicting past-floor workloads in CQ %s: %w", cq.Name, err)
+			evictions, err := evictPastFloor(ctx, c, cq.Name, minAlloc, now)
+			if err != nil {
+				return credits, fmt.Errorf("evicting past-floor workloads in CQ %s: %w", cq.Name, err)
+			}
+
+			// Compute eviction credits for evicted workloads.
+			rate := tenantCreditRate[tenant]
+			if !rate.IsZero() {
+				for _, ev := range evictions {
+					amount := rate.Mul(decimal.NewFromInt(ev.GPUCount)).Mul(decimal.NewFromFloat(ev.RuntimeSecs))
+					credits = append(credits, EvictionCredit{
+						TenantID:    tenant,
+						Amount:      amount.StringFixed(6),
+						WorkloadUID: ev.WorkloadUID,
+						RuntimeSecs: ev.RuntimeSecs,
+					})
+				}
 			}
 		} else {
 			none := kueuev1beta1.None
@@ -307,23 +351,26 @@ func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node
 			}
 			cq.Spec.StopPolicy = &none
 			if err := c.Update(ctx, cq); err != nil {
-				return fmt.Errorf("thawing preemptible CQ %s: %w", cq.Name, err)
+				return credits, fmt.Errorf("thawing preemptible CQ %s: %w", cq.Name, err)
 			}
 		}
 	}
 
-	return nil
+	return credits, nil
 }
 
 // evictPastFloor deactivates Workloads in the given ClusterQueue that have been
-// admitted longer than the minimum allocation floor.
-func evictPastFloor(ctx context.Context, c client.Client, cqName string, minAllocSeconds int32, now time.Time) error {
+// admitted longer than the minimum allocation floor. It annotates each evicted
+// workload so the collector can distinguish billing-driven preemption from other
+// eviction causes, and returns info about each eviction for credit computation.
+func evictPastFloor(ctx context.Context, c client.Client, cqName string, minAllocSeconds int32, now time.Time) ([]EvictionInfo, error) {
 	var workloads kueuev1beta1.WorkloadList
 	if err := c.List(ctx, &workloads); err != nil {
-		return fmt.Errorf("listing workloads: %w", err)
+		return nil, fmt.Errorf("listing workloads: %w", err)
 	}
 
 	floor := time.Duration(minAllocSeconds) * time.Second
+	var evictions []EvictionInfo
 
 	for i := range workloads.Items {
 		wl := &workloads.Items[i]
@@ -341,12 +388,44 @@ func evictPastFloor(ctx context.Context, c client.Client, cqName string, minAllo
 		}
 
 		if now.Sub(admittedCond.LastTransitionTime.Time) >= floor {
+			// Annotate before deactivating so the collector can read the reason.
+			if wl.Annotations == nil {
+				wl.Annotations = make(map[string]string)
+			}
+			wl.Annotations[AnnotationEvictionReason] = "capacity-preemption"
+
 			active := false
 			wl.Spec.Active = &active
 			if err := c.Update(ctx, wl); err != nil {
-				return fmt.Errorf("evicting workload %s/%s: %w", wl.Namespace, wl.Name, err)
+				return evictions, fmt.Errorf("evicting workload %s/%s: %w", wl.Namespace, wl.Name, err)
+			}
+
+			runtimeSecs := now.Sub(admittedCond.LastTransitionTime.Time).Seconds()
+			gpuCount := workloadGPUCount(wl)
+
+			evictions = append(evictions, EvictionInfo{
+				WorkloadUID: string(wl.UID),
+				TenantID:    cqName, // caller replaces with actual tenant
+				GPUCount:    gpuCount,
+				RuntimeSecs: runtimeSecs,
+			})
+		}
+	}
+	return evictions, nil
+}
+
+// workloadGPUCount extracts the total GPU count from a Kueue Workload's PodSets.
+func workloadGPUCount(wl *kueuev1beta1.Workload) int64 {
+	var total int64
+	for _, ps := range wl.Spec.PodSets {
+		for _, c := range ps.Template.Spec.Containers {
+			if gpus, ok := c.Resources.Requests[gpuResourceKey]; ok {
+				total += gpus.Value() * int64(ps.Count)
 			}
 		}
 	}
-	return nil
+	if total == 0 {
+		total = 1
+	}
+	return total
 }

@@ -139,6 +139,21 @@ func validateReservationSpec(r *Reservation) field.ErrorList {
 		}
 	}
 
+	if r.Spec.EvictionCreditPerGpuSecond != nil {
+		if r.Spec.Class == ReservationClassGuaranteed {
+			errs = append(errs, field.Invalid(
+				specPath.Child("evictionCreditPerGpuSecond"), *r.Spec.EvictionCreditPerGpuSecond,
+				"only applicable to Preemptible reservations",
+			))
+		}
+		if !decimalPattern.MatchString(*r.Spec.EvictionCreditPerGpuSecond) {
+			errs = append(errs, field.Invalid(
+				specPath.Child("evictionCreditPerGpuSecond"), *r.Spec.EvictionCreditPerGpuSecond,
+				"must be a non-negative decimal string with up to 6 fractional digits",
+			))
+		}
+	}
+
 	if !decimalPattern.MatchString(r.Spec.MonthlyPrice) {
 		errs = append(errs, field.Invalid(
 			specPath.Child("monthlyPrice"), r.Spec.MonthlyPrice,

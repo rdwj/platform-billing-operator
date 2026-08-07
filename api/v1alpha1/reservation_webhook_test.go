@@ -118,3 +118,76 @@ func TestValidateReservationSpec_MinAllocationSeconds(t *testing.T) {
 		})
 	}
 }
+
+func stringPtr(s string) *string { return &s }
+
+func TestValidateReservationSpec_EvictionCreditPerGpuSecond(t *testing.T) {
+	tests := []struct {
+		name      string
+		class     string
+		credit    *string
+		wantError bool
+		errField  string
+	}{
+		{
+			name:      "Preemptible with valid credit rate",
+			class:     ReservationClassPreemptible,
+			credit:    stringPtr("0.001000"),
+			wantError: false,
+		},
+		{
+			name:      "Preemptible without credit (nil)",
+			class:     ReservationClassPreemptible,
+			credit:    nil,
+			wantError: false,
+		},
+		{
+			name:      "Preemptible with zero credit",
+			class:     ReservationClassPreemptible,
+			credit:    stringPtr("0"),
+			wantError: false,
+		},
+		{
+			name:      "Guaranteed with credit rejected",
+			class:     ReservationClassGuaranteed,
+			credit:    stringPtr("0.001000"),
+			wantError: true,
+			errField:  "spec.evictionCreditPerGpuSecond",
+		},
+		{
+			name:      "Invalid decimal format",
+			class:     ReservationClassPreemptible,
+			credit:    stringPtr("not-a-number"),
+			wantError: true,
+			errField:  "spec.evictionCreditPerGpuSecond",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := validReservation(tt.class)
+			r.Spec.EvictionCreditPerGpuSecond = tt.credit
+
+			errs := validateReservationSpec(r)
+
+			if tt.wantError && len(errs) == 0 {
+				t.Errorf("expected validation error for %s, got none", tt.errField)
+			}
+			if !tt.wantError && len(errs) > 0 {
+				t.Errorf("expected no errors, got: %v", errs)
+			}
+			if tt.wantError && len(errs) > 0 {
+				found := false
+				for _, e := range errs {
+					if e.Field == tt.errField {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error on field %q, got errors: %v", tt.errField, errs)
+				}
+			}
+		})
+	}
+}

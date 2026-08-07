@@ -16,6 +16,8 @@ import (
 	kueuev1beta1 "sigs.k8s.io/kueue/apis/kueue/v1beta1"
 )
 
+const annotationEvictionReason = "billing.opendatahub.io/eviction-reason"
+
 // RBAC markers for the GPU collector.
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=workloads,verbs=get;list;watch
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=workloads/status,verbs=get
@@ -67,7 +69,7 @@ func (c *Collector) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 		defer c.mu.Unlock()
 		for uid, ws := range c.workloads {
 			if ws.WorkloadName == req.Name && ws.Namespace == req.Namespace {
-				c.emitFinalInterval(ctx, log, ws, time.Now())
+				c.emitFinalInterval(ctx, log, ws, time.Now(), "deleted")
 				delete(c.workloads, uid)
 				return ctrl.Result{}, nil
 			}
@@ -83,7 +85,7 @@ func (c *Collector) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		if ws, tracking := c.workloads[uid]; tracking {
-			c.emitFinalInterval(ctx, log, ws, finishedCond.LastTransitionTime.Time)
+			c.emitFinalInterval(ctx, log, ws, finishedCond.LastTransitionTime.Time, "finished")
 			delete(c.workloads, uid)
 		}
 		return ctrl.Result{}, nil
@@ -95,7 +97,11 @@ func (c *Collector) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resul
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		if ws, tracking := c.workloads[uid]; tracking {
-			c.emitFinalInterval(ctx, log, ws, evictedCond.LastTransitionTime.Time)
+			reason := "evicted"
+			if r := wl.Annotations[annotationEvictionReason]; r != "" {
+				reason = r
+			}
+			c.emitFinalInterval(ctx, log, ws, evictedCond.LastTransitionTime.Time, reason)
 			delete(c.workloads, uid)
 		}
 		return ctrl.Result{}, nil
@@ -220,7 +226,7 @@ func (c *Collector) resolveSKU(ctx context.Context, wl *kueuev1beta1.Workload) (
 }
 
 // emitFinalInterval emits the last usage event covering time since the previous interval boundary.
-func (c *Collector) emitFinalInterval(ctx context.Context, log logr.Logger, ws *WorkloadState, endTime time.Time) {
+func (c *Collector) emitFinalInterval(ctx context.Context, log logr.Logger, ws *WorkloadState, endTime time.Time, reason string) {
 	if !endTime.After(ws.LastIntervalEnd) {
 		return
 	}
@@ -241,6 +247,7 @@ func (c *Collector) emitFinalInterval(ctx context.Context, log logr.Logger, ws *
 		Queue:         ws.Queue,
 		WorkloadName:  ws.WorkloadName,
 		Status:        "ok",
+		Reason:        reason,
 		OccurredAt:    endTime,
 	}
 
@@ -256,7 +263,7 @@ func (c *Collector) emitFinalInterval(ctx context.Context, log logr.Logger, ws *
 	}
 
 	log.Info("emitted GPU usage event", "record_id", ev.RecordID,
-		"gpu_seconds", gpuSeconds, "interval_seq", ws.IntervalSeq)
+		"gpu_seconds", gpuSeconds, "interval_seq", ws.IntervalSeq, "reason", reason)
 }
 
 // StartIntervalTicker runs as a manager.RunnableFunc goroutine. It fires every

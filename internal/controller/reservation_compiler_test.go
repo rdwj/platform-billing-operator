@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -414,7 +415,7 @@ func TestTriggerPreemption_HoldWhenGuaranteedExceedsCapacity(t *testing.T) {
 			billingv1alpha1.ReservationStateActive, 4),
 	}
 
-	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
+	if _, err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
 		t.Fatalf("triggerPreemption: %v", err)
 	}
 
@@ -441,7 +442,7 @@ func TestTriggerPreemption_ThawWhenCapacityAvailable(t *testing.T) {
 			billingv1alpha1.ReservationStateActive, 2),
 	}
 
-	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
+	if _, err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
 		t.Fatalf("triggerPreemption: %v", err)
 	}
 
@@ -477,7 +478,7 @@ func TestTriggerPreemption_EvictsWorkloadPastFloor(t *testing.T) {
 		preemptRes,
 	}
 
-	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
+	if _, err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
 		t.Fatalf("triggerPreemption: %v", err)
 	}
 
@@ -510,7 +511,7 @@ func TestTriggerPreemption_ProtectsWorkloadWithinFloor(t *testing.T) {
 		preemptRes,
 	}
 
-	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
+	if _, err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
 		t.Fatalf("triggerPreemption: %v", err)
 	}
 
@@ -544,7 +545,7 @@ func TestTriggerPreemption_SelectiveEviction(t *testing.T) {
 		preemptRes,
 	}
 
-	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", now); err != nil {
+	if _, err := triggerPreemption(context.Background(), c, nodes, reservations, "", now); err != nil {
 		t.Fatalf("triggerPreemption: %v", err)
 	}
 
@@ -581,12 +582,245 @@ func TestTriggerPreemption_DefaultMinAllocation(t *testing.T) {
 			billingv1alpha1.ReservationStateActive, 2),
 	}
 
-	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
+	if _, err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
 		t.Fatalf("triggerPreemption: %v", err)
 	}
 
 	protected := getWorkload(t, c, "default", "wl-1")
 	if protected.Spec.Active != nil && !*protected.Spec.Active {
 		t.Error("workload within default 4h floor should NOT be evicted")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Eviction credits
+// ---------------------------------------------------------------------------
+
+func stringPtr(s string) *string { return &s }
+
+func fakeWorkloadWithGPU(name, ns, cqName string, admittedAt time.Time, gpuCount int64) *kueuev1beta1.Workload {
+	wl := fakeWorkload(name, ns, cqName, admittedAt)
+	wl.Spec.PodSets = []kueuev1beta1.PodSet{{
+		Count: 1,
+		Template: corev1.PodTemplateSpec{
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{
+					Name: "gpu-worker",
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							gpuResourceKey: resource.MustParse(fmt.Sprintf("%d", gpuCount)),
+						},
+					},
+				}},
+			},
+		},
+	}}
+	return wl
+}
+
+func TestTriggerPreemption_EvictionCreditWithNonZeroRate(t *testing.T) {
+	nonePolicy := kueuev1beta1.None
+	cq := preemptibleCQFixture(&nonePolicy)
+
+	now := time.Now()
+	admittedAt := now.Add(-5 * time.Hour) // admitted 5h ago, past 4h floor
+	wl := fakeWorkloadWithGPU("wl-evict", "default", cq.Name, admittedAt, 2)
+
+	c := newCompilerClient(t, cq, wl)
+
+	nodes := []corev1.Node{
+		fakeGPUNode("node-1", "h200", "default", 4, nil),
+	}
+	preemptRes := fakeReservation("res-p1", "tenant-a", "h200", "default",
+		billingv1alpha1.ReservationClassPreemptible,
+		billingv1alpha1.ReservationStateActive, 2)
+	preemptRes.Spec.MinAllocationSeconds = int32Ptr(14400)
+	preemptRes.Spec.EvictionCreditPerGpuSecond = stringPtr("0.001000")
+	reservations := []billingv1alpha1.Reservation{
+		fakeReservation("res-g1", "tenant-a", "h200", "default",
+			billingv1alpha1.ReservationClassGuaranteed,
+			billingv1alpha1.ReservationStateActive, 4),
+		preemptRes,
+	}
+
+	credits, err := triggerPreemption(context.Background(), c, nodes, reservations, "", now)
+	if err != nil {
+		t.Fatalf("triggerPreemption: %v", err)
+	}
+
+	// Workload should be evicted
+	evicted := getWorkload(t, c, "default", "wl-evict")
+	if evicted.Spec.Active == nil || *evicted.Spec.Active {
+		t.Error("workload should be evicted")
+	}
+
+	// Annotation should be set
+	if evicted.Annotations[AnnotationEvictionReason] != "capacity-preemption" {
+		t.Errorf("eviction reason annotation = %q, want capacity-preemption",
+			evicted.Annotations[AnnotationEvictionReason])
+	}
+
+	// Should have exactly 1 credit
+	if len(credits) != 1 {
+		t.Fatalf("expected 1 credit, got %d", len(credits))
+	}
+
+	cr := credits[0]
+	if cr.TenantID != "tenant-a" {
+		t.Errorf("credit tenant = %q, want tenant-a", cr.TenantID)
+	}
+	// Amount = 0.001000 * 2 GPUs * ~18000 seconds (5h)
+	// Should be a positive decimal string
+	if cr.Amount == "" || cr.Amount == "0.000000" {
+		t.Errorf("credit amount should be non-zero positive, got %q", cr.Amount)
+	}
+}
+
+func TestTriggerPreemption_NoCreditWhenRateZero(t *testing.T) {
+	nonePolicy := kueuev1beta1.None
+	cq := preemptibleCQFixture(&nonePolicy)
+
+	now := time.Now()
+	admittedAt := now.Add(-5 * time.Hour)
+	wl := fakeWorkloadWithGPU("wl-evict", "default", cq.Name, admittedAt, 1)
+
+	c := newCompilerClient(t, cq, wl)
+
+	nodes := []corev1.Node{
+		fakeGPUNode("node-1", "h200", "default", 4, nil),
+	}
+	preemptRes := fakeReservation("res-p1", "tenant-a", "h200", "default",
+		billingv1alpha1.ReservationClassPreemptible,
+		billingv1alpha1.ReservationStateActive, 2)
+	preemptRes.Spec.MinAllocationSeconds = int32Ptr(14400)
+	// No EvictionCreditPerGpuSecond set — defaults to zero
+	reservations := []billingv1alpha1.Reservation{
+		fakeReservation("res-g1", "tenant-a", "h200", "default",
+			billingv1alpha1.ReservationClassGuaranteed,
+			billingv1alpha1.ReservationStateActive, 4),
+		preemptRes,
+	}
+
+	credits, err := triggerPreemption(context.Background(), c, nodes, reservations, "", now)
+	if err != nil {
+		t.Fatalf("triggerPreemption: %v", err)
+	}
+
+	// Workload should still be evicted
+	evicted := getWorkload(t, c, "default", "wl-evict")
+	if evicted.Spec.Active == nil || *evicted.Spec.Active {
+		t.Error("workload should be evicted even without credit")
+	}
+
+	// No credits when rate is zero
+	if len(credits) != 0 {
+		t.Errorf("expected 0 credits (zero rate), got %d", len(credits))
+	}
+}
+
+func TestEvictPastFloor_AnnotatesWorkload(t *testing.T) {
+	admittedAt := time.Now().Add(-5 * time.Hour)
+	wl := fakeWorkload("wl-1", "default", "test-cq", admittedAt)
+
+	c := newCompilerClient(t, wl)
+
+	now := time.Now()
+	evictions, err := evictPastFloor(context.Background(), c, "test-cq", 14400, now)
+	if err != nil {
+		t.Fatalf("evictPastFloor: %v", err)
+	}
+
+	if len(evictions) != 1 {
+		t.Fatalf("expected 1 eviction, got %d", len(evictions))
+	}
+
+	wlUpdated := getWorkload(t, c, "default", "wl-1")
+	if wlUpdated.Annotations[AnnotationEvictionReason] != "capacity-preemption" {
+		t.Errorf("annotation = %q, want capacity-preemption",
+			wlUpdated.Annotations[AnnotationEvictionReason])
+	}
+
+	if evictions[0].RuntimeSecs <= 0 {
+		t.Errorf("runtime should be positive, got %f", evictions[0].RuntimeSecs)
+	}
+}
+
+func TestWorkloadGPUCount(t *testing.T) {
+	tests := []struct {
+		name    string
+		wl      *kueuev1beta1.Workload
+		wantGPU int64
+	}{
+		{
+			name: "single container with 2 GPUs",
+			wl: &kueuev1beta1.Workload{
+				Spec: kueuev1beta1.WorkloadSpec{
+					PodSets: []kueuev1beta1.PodSet{{
+						Count: 1,
+						Template: corev1.PodTemplateSpec{
+							Spec: corev1.PodSpec{
+								Containers: []corev1.Container{{
+									Resources: corev1.ResourceRequirements{
+										Requests: corev1.ResourceList{
+											gpuResourceKey: resource.MustParse("2"),
+										},
+									},
+								}},
+							},
+						},
+					}},
+				},
+			},
+			wantGPU: 2,
+		},
+		{
+			name: "no GPU request defaults to 1",
+			wl: &kueuev1beta1.Workload{
+				Spec: kueuev1beta1.WorkloadSpec{
+					PodSets: []kueuev1beta1.PodSet{{
+						Count: 1,
+						Template: corev1.PodTemplateSpec{
+							Spec: corev1.PodSpec{
+								Containers: []corev1.Container{{
+									Resources: corev1.ResourceRequirements{},
+								}},
+							},
+						},
+					}},
+				},
+			},
+			wantGPU: 1,
+		},
+		{
+			name: "multi-pod set scales",
+			wl: &kueuev1beta1.Workload{
+				Spec: kueuev1beta1.WorkloadSpec{
+					PodSets: []kueuev1beta1.PodSet{{
+						Count: 3,
+						Template: corev1.PodTemplateSpec{
+							Spec: corev1.PodSpec{
+								Containers: []corev1.Container{{
+									Resources: corev1.ResourceRequirements{
+										Requests: corev1.ResourceList{
+											gpuResourceKey: resource.MustParse("1"),
+										},
+									},
+								}},
+							},
+						},
+					}},
+				},
+			},
+			wantGPU: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := workloadGPUCount(tt.wl)
+			if got != tt.wantGPU {
+				t.Errorf("workloadGPUCount = %d, want %d", got, tt.wantGPU)
+			}
+		})
 	}
 }

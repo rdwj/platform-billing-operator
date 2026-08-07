@@ -82,7 +82,8 @@ func adjustCmd() *cobra.Command {
 	cmd.Flags().StringVar(&tenant, "tenant", "", "tenant ID (required)")
 	cmd.Flags().StringVar(&amount, "amount", "", "decimal amount, e.g. 25.000000 (required)")
 	cmd.Flags().StringVar(&kind, "kind", "",
-		"manual_credit, manual_debit, balance_carry_in, writeoff, unmetered_gap (required)")
+		"adjustment kind (required): manual_credit, manual_debit, balance_carry_in, "+
+			"writeoff, unmetered_gap, payment_credit, eviction_credit, sla_credit, refund")
 	cmd.Flags().StringVar(&reason, "reason", "", "audit-log reason (required)")
 	cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "unique key, min 8 chars (required)")
 	_ = cmd.MarkFlagRequired("tenant")

@@ -56,5 +56,6 @@ type IntervalEvent struct {
 	Queue         string
 	WorkloadName  string
 	Status        string
+	Reason        string
 	OccurredAt    time.Time
 }

@@ -72,6 +72,13 @@ spec:
                 format: int32
                 minimum: 1
                 type: integer
+              evictionCreditPerGpuSecond:
+                description: |-
+                  EvictionCreditPerGpuSecond is the credit rate applied when a Preemptible
+                  workload is evicted due to capacity contention. Only applicable to
+                  Preemptible class. Defaults to "0" (no credit). Positive decimal string.
+                pattern: ^\d+(\.\d{1,6})?$
+                type: string
               geo:
                 description: Geo is the geographic region for this reservation.
                 type: string

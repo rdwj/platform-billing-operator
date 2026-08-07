@@ -76,7 +76,7 @@ func TestEmitFinalInterval_CorrectGPUSeconds(t *testing.T) {
 		IntervalSeq:     0,
 	}
 
-	c.emitFinalInterval(context.Background(), c.Log, ws, endTime)
+	c.emitFinalInterval(context.Background(), c.Log, ws, endTime, "finished")
 
 	require.Equal(t, 1, sender.sentCount(), "should emit exactly one event")
 
@@ -114,11 +114,11 @@ func TestEmitFinalInterval_NoEmissionWhenEndBeforeStart(t *testing.T) {
 	}
 
 	// endTime before LastIntervalEnd: nothing emitted
-	c.emitFinalInterval(context.Background(), c.Log, ws, baseTime.Add(-5*time.Minute))
+	c.emitFinalInterval(context.Background(), c.Log, ws, baseTime.Add(-5*time.Minute), "finished")
 	require.Equal(t, 0, sender.sentCount(), "should not emit when endTime < LastIntervalEnd")
 
 	// endTime equal to LastIntervalEnd: nothing emitted
-	c.emitFinalInterval(context.Background(), c.Log, ws, baseTime)
+	c.emitFinalInterval(context.Background(), c.Log, ws, baseTime, "finished")
 	require.Equal(t, 0, sender.sentCount(), "should not emit when endTime == LastIntervalEnd")
 }
 

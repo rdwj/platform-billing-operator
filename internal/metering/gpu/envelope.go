@@ -61,13 +61,16 @@ func BuildEnvelope(ev IntervalEvent, collectorVersion string) (json.RawMessage, 
 		},
 	}
 
-	if ev.Queue != "" || ev.WorkloadName != "" {
+	if ev.Queue != "" || ev.WorkloadName != "" || ev.Reason != "" {
 		envelope.Attributes = make(map[string]string)
 		if ev.Queue != "" {
 			envelope.Attributes["queue"] = ev.Queue
 		}
 		if ev.WorkloadName != "" {
 			envelope.Attributes["workload"] = ev.WorkloadName
+		}
+		if ev.Reason != "" {
+			envelope.Attributes["reason"] = ev.Reason
 		}
 	}
 

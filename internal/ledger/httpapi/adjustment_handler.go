@@ -118,10 +118,11 @@ func (h *adjustmentHandler) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	switch req.Kind {
-	case "manual_credit", "manual_debit", "balance_carry_in", "writeoff", "unmetered_gap", "payment_credit":
+	case "manual_credit", "manual_debit", "balance_carry_in", "writeoff", "unmetered_gap",
+		"payment_credit", "eviction_credit", "sla_credit", "refund":
 	default:
 		writeError(w, http.StatusBadRequest,
-			"kind must be one of: manual_credit, manual_debit, balance_carry_in, writeoff, unmetered_gap")
+			"kind must be one of: manual_credit, manual_debit, balance_carry_in, writeoff, unmetered_gap, payment_credit, eviction_credit, sla_credit, refund")
 		return
 	}
 

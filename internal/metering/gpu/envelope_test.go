@@ -89,6 +89,7 @@ func TestBuildEnvelope_OmitsEmptyOptional(t *testing.T) {
 	ev.Geo = ""
 	ev.Queue = ""
 	ev.WorkloadName = ""
+	ev.Reason = ""
 
 	raw, err := gpu.BuildEnvelope(ev, "")
 	require.NoError(t, err)
@@ -100,12 +101,55 @@ func TestBuildEnvelope_OmitsEmptyOptional(t *testing.T) {
 	require.False(t, hasGeo, "geo should be omitted when empty")
 
 	_, hasAttrs := m["attributes"]
-	require.False(t, hasAttrs, "attributes should be omitted when no queue or workload")
+	require.False(t, hasAttrs, "attributes should be omitted when no queue, workload, or reason")
 
 	// collector_version should also be omitted when empty
 	source := m["source"].(map[string]any)
 	_, hasVersion := source["collector_version"]
 	require.False(t, hasVersion, "collector_version should be omitted when empty")
+}
+
+func TestBuildEnvelope_IncludesReason(t *testing.T) {
+	ev := referenceEvent()
+	ev.Reason = "capacity-preemption"
+
+	raw, err := gpu.BuildEnvelope(ev, "")
+	require.NoError(t, err)
+
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(raw, &m))
+
+	attrs, ok := m["attributes"].(map[string]any)
+	require.True(t, ok, "attributes should be present")
+	require.Equal(t, "capacity-preemption", attrs["reason"])
+}
+
+func TestBuildEnvelope_ReasonOnlyInAttributes(t *testing.T) {
+	ev := gpu.IntervalEvent{
+		RecordID:      "wl-test-interval-0000",
+		TenantID:      "ten-test",
+		SKU:           "h200",
+		GPUSeconds:    100,
+		SliceFraction: 1.0,
+		IntervalStart: time.Date(2026, 8, 7, 0, 0, 0, 0, time.UTC),
+		IntervalEnd:   time.Date(2026, 8, 7, 1, 0, 0, 0, time.UTC),
+		IntervalSeq:   0,
+		Status:        "ok",
+		Reason:        "finished",
+		OccurredAt:    time.Date(2026, 8, 7, 1, 0, 0, 0, time.UTC),
+	}
+
+	raw, err := gpu.BuildEnvelope(ev, "")
+	require.NoError(t, err)
+
+	var m map[string]any
+	require.NoError(t, json.Unmarshal(raw, &m))
+
+	attrs, ok := m["attributes"].(map[string]any)
+	require.True(t, ok, "attributes should be present when reason is set")
+	require.Equal(t, "finished", attrs["reason"])
+	_, hasQueue := attrs["queue"]
+	require.False(t, hasQueue, "queue should not be in attributes when empty")
 }
 
 func TestBuildEnvelope_IncludesCollectorVersion(t *testing.T) {

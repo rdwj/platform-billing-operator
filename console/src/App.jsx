@@ -38,8 +38,8 @@ function buildTenantDetail(t, credited, frozen) {
 }
 
 function mapLedgerEntry(e) {
-  const typeMap = { charge: 'Charge', manual_credit: 'Credit', manual_debit: 'Debit', reload: 'Reload', payment_credit: 'Credit', balance_carry_in: 'Carry-in', writeoff: 'Write-off', sla_credit: 'SLA credit', promo: 'Promo' };
-  const colorMap = { charge: 'grey', manual_credit: 'blue', manual_debit: 'red', reload: 'green', payment_credit: 'green', balance_carry_in: 'blue', writeoff: 'red', sla_credit: 'blue', promo: 'purple' };
+  const typeMap = { charge: 'Charge', manual_credit: 'Credit', manual_debit: 'Debit', reload: 'Reload', payment_credit: 'Credit', balance_carry_in: 'Carry-in', writeoff: 'Write-off', sla_credit: 'SLA credit', promo: 'Promo', eviction_credit: 'Eviction credit', refund: 'Refund' };
+  const colorMap = { charge: 'grey', manual_credit: 'blue', manual_debit: 'red', reload: 'green', payment_credit: 'green', balance_carry_in: 'blue', writeoff: 'red', sla_credit: 'blue', promo: 'purple', eviction_credit: 'blue', refund: 'orange' };
   const amt = parseFloat(e.amount);
   return {
     date: new Date(e.timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),

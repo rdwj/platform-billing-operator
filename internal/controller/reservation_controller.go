@@ -33,15 +33,21 @@ import (
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 )
 
+// AdjustmentPoster posts billing adjustments to the ledger HTTP API.
+type AdjustmentPoster interface {
+	PostEvictionCredit(ctx context.Context, tenant, amount, workloadUID string, runtimeSecs float64) error
+}
+
 // ReservationReconciler manages the Reservation state machine:
 // Requested → Confirmed → Active → Expired.
 // Active (or Confirmed) → Cancelled is an out-of-band terminal transition
 // triggered by the HTTP cancel handler; the controller treats it as terminal.
 type ReservationReconciler struct {
 	client.Client
-	Scheme   *runtime.Scheme
-	Now      func() time.Time
-	GeoLabel string
+	Scheme           *runtime.Scheme
+	Now              func() time.Time
+	GeoLabel         string
+	AdjustmentPoster AdjustmentPoster
 }
 
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=reservations,verbs=get;list;watch;update;patch
@@ -192,6 +198,8 @@ func (r *ReservationReconciler) handleRequested(ctx context.Context, res *billin
 // reservation state transition. Errors are logged but not returned to avoid
 // blocking the state machine.
 func (r *ReservationReconciler) compileAndTrigger(ctx context.Context, res *billingv1alpha1.Reservation) error {
+	logger := log.FromContext(ctx)
+
 	if err := compileKueueState(ctx, r.Client, res.Spec.TenantRef); err != nil {
 		return fmt.Errorf("compileKueueState: %w", err)
 	}
@@ -205,8 +213,20 @@ func (r *ReservationReconciler) compileAndTrigger(ctx context.Context, res *bill
 		return fmt.Errorf("listing reservations: %w", err)
 	}
 
-	if err := triggerPreemption(ctx, r.Client, nodeList.Items, allRes.Items, r.geoLabel(), r.now()); err != nil {
+	credits, err := triggerPreemption(ctx, r.Client, nodeList.Items, allRes.Items, r.geoLabel(), r.now())
+	if err != nil {
 		return fmt.Errorf("triggerPreemption: %w", err)
+	}
+
+	// Post eviction credits best-effort. The eviction already happened;
+	// failing to post a credit must not block the reconcile loop.
+	if r.AdjustmentPoster != nil {
+		for _, cr := range credits {
+			if postErr := r.AdjustmentPoster.PostEvictionCredit(ctx, cr.TenantID, cr.Amount, cr.WorkloadUID, cr.RuntimeSecs); postErr != nil {
+				logger.Error(postErr, "failed to post eviction credit (best-effort)",
+					"tenant", cr.TenantID, "amount", cr.Amount, "workload", cr.WorkloadUID)
+			}
+		}
 	}
 
 	return nil

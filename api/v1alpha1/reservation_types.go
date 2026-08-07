@@ -96,6 +96,13 @@ type ReservationSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	MinAllocationSeconds *int32 `json:"minAllocationSeconds,omitempty"`
 
+	// EvictionCreditPerGpuSecond is the credit rate applied when a Preemptible
+	// workload is evicted due to capacity contention. Only applicable to
+	// Preemptible class. Defaults to "0" (no credit). Positive decimal string.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^\d+(\.\d{1,6})?$`
+	EvictionCreditPerGpuSecond *string `json:"evictionCreditPerGpuSecond,omitempty"`
+
 	// MonthlyPrice is the fixed monthly price for this reservation as a decimal string.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Pattern=`^\d+(\.\d{1,6})?$`
