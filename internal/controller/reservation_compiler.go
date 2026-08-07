@@ -20,9 +20,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -212,9 +214,11 @@ func findFlavorForSKU(ctx context.Context, c client.Client, sku string) (string,
 }
 
 // triggerPreemption checks whether Guaranteed demand has consumed all available
-// capacity and, if so, sets StopPolicy=HoldAndDrain on Preemptible CQs. When
-// Guaranteed demand drops below capacity, StopPolicy is cleared.
-func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node, reservations []billingv1alpha1.Reservation, geoLabel string) error {
+// capacity and, if so, holds the Preemptible CQ (stopping new admissions) and
+// selectively evicts workloads that have exceeded their minimum allocation time.
+// Workloads within their minimum allocation floor are left running.
+// When Guaranteed demand drops below capacity, StopPolicy is cleared.
+func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node, reservations []billingv1alpha1.Reservation, geoLabel string, now time.Time) error {
 	guaranteedDemand := make(map[capacityKey]int32)
 	nodeCapacity := make(map[capacityKey]int32)
 
@@ -231,6 +235,10 @@ func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node
 		nodeCapacity[key] += nodeGPUCapacity(node)
 	}
 
+	// Build per-tenant min-allocation floor from active Preemptible reservations.
+	// When multiple Preemptible reservations exist for a tenant, use the maximum
+	// minAllocationSeconds (most protective for the tenant).
+	tenantMinAlloc := make(map[string]int32)
 	for _, res := range reservations {
 		switch res.Status.State {
 		case billingv1alpha1.ReservationStateConfirmed, billingv1alpha1.ReservationStateActive:
@@ -240,6 +248,15 @@ func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node
 		if res.Spec.Class == billingv1alpha1.ReservationClassGuaranteed {
 			key := capacityKey{SKU: res.Spec.SKU, Geo: res.Spec.Geo}
 			guaranteedDemand[key] += res.Spec.Count
+		}
+		if res.Spec.Class == billingv1alpha1.ReservationClassPreemptible {
+			minAlloc := billingv1alpha1.DefaultMinAllocationSeconds
+			if res.Spec.MinAllocationSeconds != nil {
+				minAlloc = *res.Spec.MinAllocationSeconds
+			}
+			if minAlloc > tenantMinAlloc[res.Spec.TenantRef] {
+				tenantMinAlloc[res.Spec.TenantRef] = minAlloc
+			}
 		}
 	}
 
@@ -268,13 +285,20 @@ func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node
 		key := capacityKey{SKU: cqSKU, Geo: cqGeo}
 
 		if contested[key] {
-			drain := kueuev1beta1.HoldAndDrain
-			if cq.Spec.StopPolicy != nil && *cq.Spec.StopPolicy == drain {
-				continue
+			// Hold: stop new admissions but don't blanket-drain running workloads.
+			hold := kueuev1beta1.Hold
+			if cq.Spec.StopPolicy == nil || *cq.Spec.StopPolicy != hold {
+				cq.Spec.StopPolicy = &hold
+				if err := c.Update(ctx, cq); err != nil {
+					return fmt.Errorf("holding preemptible CQ %s: %w", cq.Name, err)
+				}
 			}
-			cq.Spec.StopPolicy = &drain
-			if err := c.Update(ctx, cq); err != nil {
-				return fmt.Errorf("draining preemptible CQ %s: %w", cq.Name, err)
+
+			// Selectively evict workloads past their minimum allocation floor.
+			tenant := cq.Labels[labelTenant]
+			minAlloc := tenantMinAlloc[tenant]
+			if err := evictPastFloor(ctx, c, cq.Name, minAlloc, now); err != nil {
+				return fmt.Errorf("evicting past-floor workloads in CQ %s: %w", cq.Name, err)
 			}
 		} else {
 			none := kueuev1beta1.None
@@ -288,5 +312,41 @@ func triggerPreemption(ctx context.Context, c client.Client, nodes []corev1.Node
 		}
 	}
 
+	return nil
+}
+
+// evictPastFloor deactivates Workloads in the given ClusterQueue that have been
+// admitted longer than the minimum allocation floor.
+func evictPastFloor(ctx context.Context, c client.Client, cqName string, minAllocSeconds int32, now time.Time) error {
+	var workloads kueuev1beta1.WorkloadList
+	if err := c.List(ctx, &workloads); err != nil {
+		return fmt.Errorf("listing workloads: %w", err)
+	}
+
+	floor := time.Duration(minAllocSeconds) * time.Second
+
+	for i := range workloads.Items {
+		wl := &workloads.Items[i]
+
+		if wl.Status.Admission == nil || string(wl.Status.Admission.ClusterQueue) != cqName {
+			continue
+		}
+		if wl.Spec.Active != nil && !*wl.Spec.Active {
+			continue
+		}
+
+		admittedCond := apimeta.FindStatusCondition(wl.Status.Conditions, kueuev1beta1.WorkloadAdmitted)
+		if admittedCond == nil || admittedCond.Status != metav1.ConditionTrue {
+			continue
+		}
+
+		if now.Sub(admittedCond.LastTransitionTime.Time) >= floor {
+			active := false
+			wl.Spec.Active = &active
+			if err := c.Update(ctx, wl); err != nil {
+				return fmt.Errorf("evicting workload %s/%s: %w", wl.Namespace, wl.Name, err)
+			}
+		}
+	}
 	return nil
 }

@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -343,9 +344,8 @@ func TestCompileKueueState_CQDeletedOnCancel(t *testing.T) {
 // triggerPreemption
 // ---------------------------------------------------------------------------
 
-func TestTriggerPreemption_DrainWhenGuaranteedExceedsCapacity(t *testing.T) {
-	nonePolicy := kueuev1beta1.None
-	preemptibleCQ := &kueuev1beta1.ClusterQueue{
+func preemptibleCQFixture(stopPolicy *kueuev1beta1.StopPolicy) *kueuev1beta1.ClusterQueue {
+	return &kueuev1beta1.ClusterQueue{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "tenant-a-preemptible",
 			Labels: map[string]string{
@@ -356,7 +356,7 @@ func TestTriggerPreemption_DrainWhenGuaranteedExceedsCapacity(t *testing.T) {
 			Annotations: map[string]string{annotationSKU: "h200", annotationGeo: "default"},
 		},
 		Spec: kueuev1beta1.ClusterQueueSpec{
-			StopPolicy: &nonePolicy,
+			StopPolicy: stopPolicy,
 			ResourceGroups: []kueuev1beta1.ResourceGroup{{
 				CoveredResources: []corev1.ResourceName{gpuResourceKey},
 				Flavors: []kueuev1beta1.FlavorQuotas{{
@@ -369,8 +369,41 @@ func TestTriggerPreemption_DrainWhenGuaranteedExceedsCapacity(t *testing.T) {
 			}},
 		},
 	}
+}
 
-	c := newCompilerClient(t, preemptibleCQ)
+func fakeWorkload(name, ns, cqName string, admittedAt time.Time) *kueuev1beta1.Workload { //nolint:unparam
+	active := true
+	return &kueuev1beta1.Workload{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns},
+		Spec: kueuev1beta1.WorkloadSpec{
+			Active: &active,
+		},
+		Status: kueuev1beta1.WorkloadStatus{
+			Admission: &kueuev1beta1.Admission{
+				ClusterQueue: kueuev1beta1.ClusterQueueReference(cqName),
+			},
+			Conditions: []metav1.Condition{{
+				Type:               kueuev1beta1.WorkloadAdmitted,
+				Status:             metav1.ConditionTrue,
+				LastTransitionTime: metav1.NewTime(admittedAt),
+			}},
+		},
+	}
+}
+
+func getWorkload(t *testing.T, c client.Client, ns, name string) *kueuev1beta1.Workload { //nolint:unparam
+	t.Helper()
+	var wl kueuev1beta1.Workload
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name}, &wl); err != nil {
+		t.Fatalf("getting workload %s/%s: %v", ns, name, err)
+	}
+	return &wl
+}
+
+func TestTriggerPreemption_HoldWhenGuaranteedExceedsCapacity(t *testing.T) {
+	nonePolicy := kueuev1beta1.None
+	cq := preemptibleCQFixture(&nonePolicy)
+	c := newCompilerClient(t, cq)
 
 	nodes := []corev1.Node{
 		fakeGPUNode("node-1", "h200", "default", 4, nil),
@@ -381,47 +414,23 @@ func TestTriggerPreemption_DrainWhenGuaranteedExceedsCapacity(t *testing.T) {
 			billingv1alpha1.ReservationStateActive, 4),
 	}
 
-	if err := triggerPreemption(context.Background(), c, nodes, reservations, ""); err != nil {
+	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
 		t.Fatalf("triggerPreemption: %v", err)
 	}
 
 	updated := getCQ(t, c, "tenant-a-preemptible")
 	if updated.Spec.StopPolicy == nil {
-		t.Fatal("StopPolicy is nil, want HoldAndDrain")
+		t.Fatal("StopPolicy is nil, want Hold")
 	}
-	if *updated.Spec.StopPolicy != kueuev1beta1.HoldAndDrain {
-		t.Errorf("StopPolicy = %q, want HoldAndDrain", *updated.Spec.StopPolicy)
+	if *updated.Spec.StopPolicy != kueuev1beta1.Hold {
+		t.Errorf("StopPolicy = %q, want Hold", *updated.Spec.StopPolicy)
 	}
 }
 
 func TestTriggerPreemption_ThawWhenCapacityAvailable(t *testing.T) {
-	drainPolicy := kueuev1beta1.HoldAndDrain
-	preemptibleCQ := &kueuev1beta1.ClusterQueue{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "tenant-a-preemptible",
-			Labels: map[string]string{
-				labelTenant:           "tenant-a",
-				labelReservationClass: billingv1alpha1.ReservationClassPreemptible,
-				labelManagedBy:        managedByReservation,
-			},
-			Annotations: map[string]string{annotationSKU: "h200", annotationGeo: "default"},
-		},
-		Spec: kueuev1beta1.ClusterQueueSpec{
-			StopPolicy: &drainPolicy,
-			ResourceGroups: []kueuev1beta1.ResourceGroup{{
-				CoveredResources: []corev1.ResourceName{gpuResourceKey},
-				Flavors: []kueuev1beta1.FlavorQuotas{{
-					Name: "gpu-h200",
-					Resources: []kueuev1beta1.ResourceQuota{{
-						Name:         gpuResourceKey,
-						NominalQuota: resource.MustParse("2"),
-					}},
-				}},
-			}},
-		},
-	}
-
-	c := newCompilerClient(t, preemptibleCQ)
+	holdPolicy := kueuev1beta1.Hold
+	cq := preemptibleCQFixture(&holdPolicy)
+	c := newCompilerClient(t, cq)
 
 	nodes := []corev1.Node{
 		fakeGPUNode("node-1", "h200", "default", 8, nil),
@@ -432,7 +441,7 @@ func TestTriggerPreemption_ThawWhenCapacityAvailable(t *testing.T) {
 			billingv1alpha1.ReservationStateActive, 2),
 	}
 
-	if err := triggerPreemption(context.Background(), c, nodes, reservations, ""); err != nil {
+	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
 		t.Fatalf("triggerPreemption: %v", err)
 	}
 
@@ -442,5 +451,142 @@ func TestTriggerPreemption_ThawWhenCapacityAvailable(t *testing.T) {
 	}
 	if *updated.Spec.StopPolicy != kueuev1beta1.None {
 		t.Errorf("StopPolicy = %q, want None", *updated.Spec.StopPolicy)
+	}
+}
+
+func TestTriggerPreemption_EvictsWorkloadPastFloor(t *testing.T) {
+	nonePolicy := kueuev1beta1.None
+	cq := preemptibleCQFixture(&nonePolicy)
+
+	admittedAt := time.Now().Add(-5 * time.Hour) // admitted 5h ago
+	wl := fakeWorkload("wl-old", "default", cq.Name, admittedAt)
+
+	c := newCompilerClient(t, cq, wl)
+
+	nodes := []corev1.Node{
+		fakeGPUNode("node-1", "h200", "default", 4, nil),
+	}
+	preemptRes := fakeReservation("res-p1", "tenant-a", "h200", "default",
+		billingv1alpha1.ReservationClassPreemptible,
+		billingv1alpha1.ReservationStateActive, 2)
+	preemptRes.Spec.MinAllocationSeconds = int32Ptr(14400) // 4h floor
+	reservations := []billingv1alpha1.Reservation{
+		fakeReservation("res-g1", "tenant-a", "h200", "default",
+			billingv1alpha1.ReservationClassGuaranteed,
+			billingv1alpha1.ReservationStateActive, 4),
+		preemptRes,
+	}
+
+	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
+		t.Fatalf("triggerPreemption: %v", err)
+	}
+
+	evicted := getWorkload(t, c, "default", "wl-old")
+	if evicted.Spec.Active == nil || *evicted.Spec.Active {
+		t.Error("workload past floor should have Active=false, got true or nil")
+	}
+}
+
+func TestTriggerPreemption_ProtectsWorkloadWithinFloor(t *testing.T) {
+	nonePolicy := kueuev1beta1.None
+	cq := preemptibleCQFixture(&nonePolicy)
+
+	admittedAt := time.Now().Add(-1 * time.Hour) // admitted 1h ago
+	wl := fakeWorkload("wl-young", "default", cq.Name, admittedAt)
+
+	c := newCompilerClient(t, cq, wl)
+
+	nodes := []corev1.Node{
+		fakeGPUNode("node-1", "h200", "default", 4, nil),
+	}
+	preemptRes := fakeReservation("res-p1", "tenant-a", "h200", "default",
+		billingv1alpha1.ReservationClassPreemptible,
+		billingv1alpha1.ReservationStateActive, 2)
+	preemptRes.Spec.MinAllocationSeconds = int32Ptr(14400) // 4h floor
+	reservations := []billingv1alpha1.Reservation{
+		fakeReservation("res-g1", "tenant-a", "h200", "default",
+			billingv1alpha1.ReservationClassGuaranteed,
+			billingv1alpha1.ReservationStateActive, 4),
+		preemptRes,
+	}
+
+	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
+		t.Fatalf("triggerPreemption: %v", err)
+	}
+
+	protected := getWorkload(t, c, "default", "wl-young")
+	if protected.Spec.Active != nil && !*protected.Spec.Active {
+		t.Error("workload within floor should NOT be evicted, got Active=false")
+	}
+}
+
+func TestTriggerPreemption_SelectiveEviction(t *testing.T) {
+	nonePolicy := kueuev1beta1.None
+	cq := preemptibleCQFixture(&nonePolicy)
+
+	now := time.Now()
+	wlOld := fakeWorkload("wl-old", "default", cq.Name, now.Add(-5*time.Hour))
+	wlYoung := fakeWorkload("wl-young", "default", cq.Name, now.Add(-1*time.Hour))
+
+	c := newCompilerClient(t, cq, wlOld, wlYoung)
+
+	nodes := []corev1.Node{
+		fakeGPUNode("node-1", "h200", "default", 4, nil),
+	}
+	preemptRes := fakeReservation("res-p1", "tenant-a", "h200", "default",
+		billingv1alpha1.ReservationClassPreemptible,
+		billingv1alpha1.ReservationStateActive, 2)
+	preemptRes.Spec.MinAllocationSeconds = int32Ptr(14400) // 4h floor
+	reservations := []billingv1alpha1.Reservation{
+		fakeReservation("res-g1", "tenant-a", "h200", "default",
+			billingv1alpha1.ReservationClassGuaranteed,
+			billingv1alpha1.ReservationStateActive, 4),
+		preemptRes,
+	}
+
+	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", now); err != nil {
+		t.Fatalf("triggerPreemption: %v", err)
+	}
+
+	evicted := getWorkload(t, c, "default", "wl-old")
+	if evicted.Spec.Active == nil || *evicted.Spec.Active {
+		t.Error("old workload (past floor) should be evicted")
+	}
+
+	protected := getWorkload(t, c, "default", "wl-young")
+	if protected.Spec.Active != nil && !*protected.Spec.Active {
+		t.Error("young workload (within floor) should NOT be evicted")
+	}
+}
+
+func TestTriggerPreemption_DefaultMinAllocation(t *testing.T) {
+	nonePolicy := kueuev1beta1.None
+	cq := preemptibleCQFixture(&nonePolicy)
+
+	// Admitted 3h ago — within default 4h floor
+	wl := fakeWorkload("wl-1", "default", cq.Name, time.Now().Add(-3*time.Hour))
+
+	c := newCompilerClient(t, cq, wl)
+
+	nodes := []corev1.Node{
+		fakeGPUNode("node-1", "h200", "default", 4, nil),
+	}
+	// Preemptible reservation WITHOUT explicit minAllocationSeconds (uses default)
+	reservations := []billingv1alpha1.Reservation{
+		fakeReservation("res-g1", "tenant-a", "h200", "default",
+			billingv1alpha1.ReservationClassGuaranteed,
+			billingv1alpha1.ReservationStateActive, 4),
+		fakeReservation("res-p1", "tenant-a", "h200", "default",
+			billingv1alpha1.ReservationClassPreemptible,
+			billingv1alpha1.ReservationStateActive, 2),
+	}
+
+	if err := triggerPreemption(context.Background(), c, nodes, reservations, "", time.Now()); err != nil {
+		t.Fatalf("triggerPreemption: %v", err)
+	}
+
+	protected := getWorkload(t, c, "default", "wl-1")
+	if protected.Spec.Active != nil && !*protected.Spec.Active {
+		t.Error("workload within default 4h floor should NOT be evicted")
 	}
 }

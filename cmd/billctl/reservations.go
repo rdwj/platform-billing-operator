@@ -18,17 +18,18 @@ type reservationsListResponse struct {
 }
 
 type reservationResponse struct {
-	Name          string                `json:"name"`
-	Tenant        string                `json:"tenant"`
-	SKU           string                `json:"sku"`
-	Count         int32                 `json:"count"`
-	Geo           string                `json:"geo"`
-	Class         string                `json:"class"`
-	Window        reservationWindowResp `json:"window"`
-	MonthlyPrice  string                `json:"monthlyPrice"`
-	State         string                `json:"state"`
-	CancelledAt   string                `json:"cancelledAt,omitempty"`
-	CapacityCheck *capacityCheckResp    `json:"capacityCheck,omitempty"`
+	Name                 string                `json:"name"`
+	Tenant               string                `json:"tenant"`
+	SKU                  string                `json:"sku"`
+	Count                int32                 `json:"count"`
+	Geo                  string                `json:"geo"`
+	Class                string                `json:"class"`
+	MinAllocationSeconds *int32                `json:"minAllocationSeconds,omitempty"`
+	Window               reservationWindowResp `json:"window"`
+	MonthlyPrice         string                `json:"monthlyPrice"`
+	State                string                `json:"state"`
+	CancelledAt          string                `json:"cancelledAt,omitempty"`
+	CapacityCheck        *capacityCheckResp    `json:"capacityCheck,omitempty"`
 }
 
 type reservationWindowResp struct {
@@ -42,14 +43,15 @@ type capacityCheckResp struct {
 }
 
 type createReservationRequest struct {
-	Tenant       string `json:"tenant"`
-	SKU          string `json:"sku"`
-	Count        int32  `json:"count"`
-	Geo          string `json:"geo"`
-	Class        string `json:"class"`
-	Start        string `json:"start"`
-	End          string `json:"end"`
-	MonthlyPrice string `json:"monthlyPrice"`
+	Tenant               string `json:"tenant"`
+	SKU                  string `json:"sku"`
+	Count                int32  `json:"count"`
+	Geo                  string `json:"geo"`
+	Class                string `json:"class"`
+	MinAllocationSeconds *int32 `json:"minAllocationSeconds,omitempty"`
+	Start                string `json:"start"`
+	End                  string `json:"end"`
+	MonthlyPrice         string `json:"monthlyPrice"`
 }
 
 // dateOnly parses an RFC3339 timestamp and returns YYYY-MM-DD.
@@ -148,6 +150,9 @@ func reservationsGetCmd() *cobra.Command {
 			fmt.Printf("Count:         %d\n", r.Count)
 			fmt.Printf("Geo:           %s\n", r.Geo)
 			fmt.Printf("Class:         %s\n", r.Class)
+			if r.MinAllocationSeconds != nil {
+				fmt.Printf("MinAlloc:      %ds\n", *r.MinAllocationSeconds)
+			}
 			fmt.Printf("MonthlyPrice:  %s\n", r.MonthlyPrice)
 			fmt.Printf("State:         %s\n", r.State)
 			fmt.Printf("Window:        %s - %s\n", r.Window.Start, r.Window.End)
@@ -170,13 +175,13 @@ func reservationsGetCmd() *cobra.Command {
 
 func reservationsCreateCmd() *cobra.Command {
 	var tenant, sku, geo, class, start, end, monthlyPrice string
-	var count int32
+	var count, minAllocSeconds int32
 
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a new reservation",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			reqBody, err := json.Marshal(createReservationRequest{
+			req := createReservationRequest{
 				Tenant:       tenant,
 				SKU:          sku,
 				Count:        count,
@@ -185,7 +190,11 @@ func reservationsCreateCmd() *cobra.Command {
 				Start:        start,
 				End:          end,
 				MonthlyPrice: monthlyPrice,
-			})
+			}
+			if cmd.Flags().Changed("min-allocation-seconds") {
+				req.MinAllocationSeconds = &minAllocSeconds
+			}
+			reqBody, err := json.Marshal(req)
 			if err != nil {
 				return fmt.Errorf("encode request: %w", err)
 			}
@@ -217,6 +226,8 @@ func reservationsCreateCmd() *cobra.Command {
 	cmd.Flags().Int32Var(&count, "count", 0, "number of GPUs (required)")
 	cmd.Flags().StringVar(&geo, "geo", "", "geographic region (required)")
 	cmd.Flags().StringVar(&class, "class", "", "Guaranteed or Preemptible (required)")
+	cmd.Flags().Int32Var(&minAllocSeconds, "min-allocation-seconds", 0,
+		"minimum allocation time in seconds (Preemptible only)")
 	cmd.Flags().StringVar(&start, "start", "", "start time RFC3339 (required)")
 	cmd.Flags().StringVar(&end, "end", "", "end time RFC3339 (required)")
 	cmd.Flags().StringVar(&monthlyPrice, "monthly-price", "", "decimal price per month (required)")

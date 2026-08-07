@@ -161,10 +161,19 @@ rules:
   - kueue.x-k8s.io
   resources:
   - resourceflavors
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kueue.x-k8s.io
+  resources:
   - workloads
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - route.openshift.io

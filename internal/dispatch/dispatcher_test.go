@@ -41,9 +41,9 @@ func (m *mockSink) IngestEvents(_ context.Context, events []usagesink.UsageEvent
 	return len(events), nil
 }
 
-func (m *mockSink) HealthCheck(context.Context) error                            { return nil }
+func (m *mockSink) HealthCheck(context.Context) error                                  { return nil }
 func (m *mockSink) ConfigureMeters(context.Context, []usagesink.MeterDefinition) error { return nil }
-func (m *mockSink) SyncSubject(context.Context, usagesink.TenantInfo) error      { return nil }
+func (m *mockSink) SyncSubject(context.Context, usagesink.TenantInfo) error            { return nil }
 func (m *mockSink) QueryUsage(context.Context, usagesink.UsageQuery) ([]usagesink.UsageRecord, error) {
 	return nil, nil
 }

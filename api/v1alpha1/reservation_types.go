@@ -33,6 +33,8 @@ const (
 	ConditionCapacityConfirmed = "CapacityConfirmed"
 	ConditionCharged           = "Charged"
 	ConditionKueueSynced       = "KueueSynced"
+
+	DefaultMinAllocationSeconds int32 = 14400 // 4 hours
 )
 
 // ReservationWindow defines the time window for a GPU reservation.
@@ -86,6 +88,13 @@ type ReservationSpec struct {
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:Enum=Guaranteed;Preemptible
 	Class string `json:"class"`
+
+	// MinAllocationSeconds is the minimum time (in seconds) a Preemptible workload
+	// must run before it can be preempted. Only applicable to Preemptible class.
+	// Defaults to 14400 (4 hours) if not set.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	MinAllocationSeconds *int32 `json:"minAllocationSeconds,omitempty"`
 
 	// MonthlyPrice is the fixed monthly price for this reservation as a decimal string.
 	// +kubebuilder:validation:Required

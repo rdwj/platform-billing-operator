@@ -75,6 +75,14 @@ spec:
               geo:
                 description: Geo is the geographic region for this reservation.
                 type: string
+              minAllocationSeconds:
+                description: |-
+                  MinAllocationSeconds is the minimum time (in seconds) a Preemptible workload
+                  must run before it can be preempted. Only applicable to Preemptible class.
+                  Defaults to 14400 (4 hours) if not set.
+                format: int32
+                minimum: 0
+                type: integer
               monthlyPrice:
                 description: MonthlyPrice is the fixed monthly price for this reservation
                   as a decimal string.

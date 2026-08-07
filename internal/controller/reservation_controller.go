@@ -49,6 +49,7 @@ type ReservationReconciler struct {
 // +kubebuilder:rbac:groups=billing.opendatahub.io,resources=reservations/finalizers,verbs=update
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=clusterqueues,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=resourceflavors,verbs=get;list;watch
+// +kubebuilder:rbac:groups=kueue.x-k8s.io,resources=workloads,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
 func (r *ReservationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -204,7 +205,7 @@ func (r *ReservationReconciler) compileAndTrigger(ctx context.Context, res *bill
 		return fmt.Errorf("listing reservations: %w", err)
 	}
 
-	if err := triggerPreemption(ctx, r.Client, nodeList.Items, allRes.Items, r.geoLabel()); err != nil {
+	if err := triggerPreemption(ctx, r.Client, nodeList.Items, allRes.Items, r.geoLabel(), r.now()); err != nil {
 		return fmt.Errorf("triggerPreemption: %w", err)
 	}
 

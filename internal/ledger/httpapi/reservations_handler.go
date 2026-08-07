@@ -19,17 +19,18 @@ type reservationsHandler struct {
 }
 
 type reservationResponse struct {
-	Name          string                    `json:"name"`
-	Tenant        string                    `json:"tenant"`
-	SKU           string                    `json:"sku"`
-	Count         int32                     `json:"count"`
-	Geo           string                    `json:"geo"`
-	Class         string                    `json:"class"`
-	Window        reservationWindowResponse `json:"window"`
-	MonthlyPrice  string                    `json:"monthlyPrice"`
-	State         string                    `json:"state"`
-	CancelledAt   string                    `json:"cancelledAt,omitempty"`
-	CapacityCheck *capacityCheckResponse    `json:"capacityCheck,omitempty"`
+	Name                 string                    `json:"name"`
+	Tenant               string                    `json:"tenant"`
+	SKU                  string                    `json:"sku"`
+	Count                int32                     `json:"count"`
+	Geo                  string                    `json:"geo"`
+	Class                string                    `json:"class"`
+	MinAllocationSeconds *int32                    `json:"minAllocationSeconds,omitempty"`
+	Window               reservationWindowResponse `json:"window"`
+	MonthlyPrice         string                    `json:"monthlyPrice"`
+	State                string                    `json:"state"`
+	CancelledAt          string                    `json:"cancelledAt,omitempty"`
+	CapacityCheck        *capacityCheckResponse    `json:"capacityCheck,omitempty"`
 }
 
 type reservationWindowResponse struct {
@@ -43,14 +44,15 @@ type capacityCheckResponse struct {
 }
 
 type createReservationRequest struct {
-	Tenant       string `json:"tenant"`
-	SKU          string `json:"sku"`
-	Count        int32  `json:"count"`
-	Geo          string `json:"geo"`
-	Class        string `json:"class"`
-	Start        string `json:"start"`
-	End          string `json:"end"`
-	MonthlyPrice string `json:"monthlyPrice"`
+	Tenant               string `json:"tenant"`
+	SKU                  string `json:"sku"`
+	Count                int32  `json:"count"`
+	Geo                  string `json:"geo"`
+	Class                string `json:"class"`
+	MinAllocationSeconds *int32 `json:"minAllocationSeconds,omitempty"`
+	Start                string `json:"start"`
+	End                  string `json:"end"`
+	MonthlyPrice         string `json:"monthlyPrice"`
 }
 
 func (h *reservationsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -171,12 +173,13 @@ func (h *reservationsHandler) handleCreate(w http.ResponseWriter, r *http.Reques
 			Namespace:    h.defaultNS,
 		},
 		Spec: billingv1alpha1.ReservationSpec{
-			TenantRef:    req.Tenant,
-			SKU:          req.SKU,
-			Count:        req.Count,
-			Geo:          req.Geo,
-			Class:        req.Class,
-			MonthlyPrice: req.MonthlyPrice,
+			TenantRef:            req.Tenant,
+			SKU:                  req.SKU,
+			Count:                req.Count,
+			Geo:                  req.Geo,
+			Class:                req.Class,
+			MinAllocationSeconds: req.MinAllocationSeconds,
+			MonthlyPrice:         req.MonthlyPrice,
 			Window: billingv1alpha1.ReservationWindow{
 				Start: metav1.NewTime(startTime),
 				End:   metav1.NewTime(endTime),
@@ -229,14 +232,15 @@ func (h *reservationsHandler) handleCancel(w http.ResponseWriter, r *http.Reques
 
 func toReservationResponse(res *billingv1alpha1.Reservation) reservationResponse {
 	resp := reservationResponse{
-		Name:         res.Name,
-		Tenant:       res.Spec.TenantRef,
-		SKU:          res.Spec.SKU,
-		Count:        res.Spec.Count,
-		Geo:          res.Spec.Geo,
-		Class:        res.Spec.Class,
-		MonthlyPrice: res.Spec.MonthlyPrice,
-		State:        res.Status.State,
+		Name:                 res.Name,
+		Tenant:               res.Spec.TenantRef,
+		SKU:                  res.Spec.SKU,
+		Count:                res.Spec.Count,
+		Geo:                  res.Spec.Geo,
+		Class:                res.Spec.Class,
+		MinAllocationSeconds: res.Spec.MinAllocationSeconds,
+		MonthlyPrice:         res.Spec.MonthlyPrice,
+		State:                res.Status.State,
 		Window: reservationWindowResponse{
 			Start: res.Spec.Window.Start.UTC().Format(time.RFC3339),
 			End:   res.Spec.Window.End.UTC().Format(time.RFC3339),
