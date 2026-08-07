@@ -152,14 +152,14 @@ spec:
                           description: Slug is the unique identifier for this meter.
                           type: string
                         valueProperty:
-                          description: ValueProperty is the JSONPath into event data
-                            for the aggregated value.
+                          description: |-
+                            ValueProperty is the JSONPath into event data for the aggregated value.
+                            Required for SUM/AVG/MIN/MAX aggregations; unused for COUNT.
                           type: string
                       required:
                       - aggregation
                       - eventType
                       - slug
-                      - valueProperty
                       type: object
                     type: array
                 required:

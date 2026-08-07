@@ -101,8 +101,9 @@ type MeterConfig struct {
 	Aggregation string `json:"aggregation"`
 
 	// ValueProperty is the JSONPath into event data for the aggregated value.
-	// +kubebuilder:validation:Required
-	ValueProperty string `json:"valueProperty"`
+	// Required for SUM/AVG/MIN/MAX aggregations; unused for COUNT.
+	// +optional
+	ValueProperty string `json:"valueProperty,omitempty"`
 
 	// GroupBy maps label names to JSONPath expressions for grouping.
 	// +optional
