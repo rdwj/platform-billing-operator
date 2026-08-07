@@ -1609,6 +1609,45 @@ func (s *Store) QueryIngestEventRate(ctx context.Context) (int64, error) {
 	return count, nil
 }
 
+// GetDispatchCursor reads the sink dispatcher's forwarding cursor from
+// ledger_meta. Returns zero values if no cursor has been set yet.
+func (s *Store) GetDispatchCursor(ctx context.Context) (time.Time, string, error) {
+	var raw string
+	err := s.pool.QueryRow(ctx,
+		"SELECT value FROM ledger_meta WHERE key = 'dispatch_cursor'").Scan(&raw)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return time.Time{}, "", nil
+		}
+		return time.Time{}, "", fmt.Errorf("get dispatch cursor: %w", err)
+	}
+	parts := splitPageToken(raw)
+	if parts == nil {
+		return time.Time{}, "", nil
+	}
+	ts, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("parse dispatch cursor timestamp: %w", err)
+	}
+	return ts, parts[1], nil
+}
+
+// SetDispatchCursor persists the sink dispatcher's forwarding cursor.
+func (s *Store) SetDispatchCursor(ctx context.Context, eventTS time.Time, recordID string) error {
+	cursor := fmt.Sprintf("%s|%s", eventTS.Format(time.RFC3339Nano), recordID)
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO ledger_meta (key, value, updated_at)
+		VALUES ('dispatch_cursor', $1, now())
+		ON CONFLICT (key) DO UPDATE
+		SET value = EXCLUDED.value, updated_at = now()`,
+		cursor,
+	)
+	if err != nil {
+		return fmt.Errorf("set dispatch cursor: %w", err)
+	}
+	return nil
+}
+
 func splitPageToken(token string) []string {
 	idx := strings.LastIndex(token, "|")
 	if idx < 0 {

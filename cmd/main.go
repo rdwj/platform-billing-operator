@@ -22,6 +22,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -42,6 +43,7 @@ import (
 
 	billingv1alpha1 "github.com/rdwj/platform-billing-operator/api/v1alpha1"
 	"github.com/rdwj/platform-billing-operator/internal/controller"
+	"github.com/rdwj/platform-billing-operator/internal/dispatch"
 	"github.com/rdwj/platform-billing-operator/internal/drift"
 	"github.com/rdwj/platform-billing-operator/internal/enforcement"
 	"github.com/rdwj/platform-billing-operator/internal/invoice"
@@ -437,6 +439,28 @@ func main() {
 			}
 		})); err != nil {
 			setupLog.Error(err, "unable to add invoice finalization job")
+			os.Exit(1)
+		}
+
+		// --- Sink dispatcher (ledger -> usage sinks) ---
+		dispatchBatchSize := 100
+		if raw := os.Getenv("DISPATCH_BATCH_SIZE"); raw != "" {
+			if n, err := strconv.Atoi(raw); err == nil && n > 0 {
+				dispatchBatchSize = n
+			}
+		}
+		dispatchInterval := 5 * time.Second
+		if raw := os.Getenv("DISPATCH_FLUSH_INTERVAL"); raw != "" {
+			if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+				dispatchInterval = d
+			}
+		}
+		sinkDispatcher := dispatch.New(store, sinkRegistry, dispatch.Config{
+			BatchSize:     dispatchBatchSize,
+			FlushInterval: dispatchInterval,
+		}, slog.New(logr.ToSlogHandler(ctrl.Log.WithName("sink-dispatch"))))
+		if err := mgr.Add(sinkDispatcher); err != nil {
+			setupLog.Error(err, "unable to add sink dispatcher")
 			os.Exit(1)
 		}
 

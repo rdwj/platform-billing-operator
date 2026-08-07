@@ -56,3 +56,19 @@ func (r *SinkRegistry) Delete(name string) {
 	defer r.mu.Unlock()
 	delete(r.backends, name)
 }
+
+// ForEach calls fn for each registered backend while holding the read lock.
+func (r *SinkRegistry) ForEach(fn func(name string, b usagesink.UsageSinkBackend)) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for name, b := range r.backends {
+		fn(name, b)
+	}
+}
+
+// Len returns the number of registered backends.
+func (r *SinkRegistry) Len() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.backends)
+}
