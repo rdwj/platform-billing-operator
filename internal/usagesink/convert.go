@@ -21,11 +21,14 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-// profileToEventType maps billing profile names to CloudEvents event types
-// that external meters are configured to filter on.
+const (
+	EventTypeInference = "inference"
+	EventTypeGPUJob    = "gpu-job"
+)
+
 var profileToEventType = map[string]string{
-	"maas":   "inference",
-	"gpuaas": "gpu-job",
+	"maas":   EventTypeInference,
+	"gpuaas": EventTypeGPUJob,
 }
 
 // ConvertLedgerEvent maps a ledger.UsageEvent to a usagesink.UsageEvent.

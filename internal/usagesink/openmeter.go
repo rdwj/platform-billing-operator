@@ -171,7 +171,7 @@ func (b *OpenMeterBackend) IngestEvents(ctx context.Context, events []UsageEvent
 	if err != nil {
 		return 0, fmt.Errorf("IngestEvents: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -186,7 +186,7 @@ func (b *OpenMeterBackend) HealthCheck(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("HealthCheck: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		snippet, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
@@ -202,7 +202,7 @@ func (b *OpenMeterBackend) ConfigureMeters(ctx context.Context, meters []MeterDe
 		if err != nil {
 			return fmt.Errorf("ConfigureMeters: check %q: %w", m.Slug, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
 			continue
