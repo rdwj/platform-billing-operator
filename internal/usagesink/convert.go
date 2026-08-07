@@ -21,6 +21,13 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+// profileToEventType maps billing profile names to CloudEvents event types
+// that external meters are configured to filter on.
+var profileToEventType = map[string]string{
+	"maas":   "inference",
+	"gpuaas": "gpu-job",
+}
+
 // ConvertLedgerEvent maps a ledger.UsageEvent to a usagesink.UsageEvent.
 func ConvertLedgerEvent(ev ledger.UsageEvent) UsageEvent {
 	metadata := make(map[string]string, len(ev.Attributes))
@@ -28,11 +35,16 @@ func ConvertLedgerEvent(ev ledger.UsageEvent) UsageEvent {
 		metadata[k] = v
 	}
 
+	eventType := ev.Profile
+	if mapped, ok := profileToEventType[ev.Profile]; ok {
+		eventType = mapped
+	}
+
 	return UsageEvent{
 		RecordID:         ev.RecordID,
 		TenantID:         ev.TenantID,
 		Timestamp:        ev.EventTS,
-		EventType:        ev.Profile,
+		EventType:        eventType,
 		Model:            ev.SKU,
 		PromptTokens:     decimal.NewFromInt(ev.PromptTokens),
 		CompletionTokens: decimal.NewFromInt(ev.CompletionTokens),

@@ -38,7 +38,7 @@ func TestConvertLedgerEvent(t *testing.T) {
 	assert.Equal(t, "rec-001", got.RecordID)
 	assert.Equal(t, "tenant-a", got.TenantID)
 	assert.Equal(t, ts, got.Timestamp)
-	assert.Equal(t, "maas", got.EventType)
+	assert.Equal(t, "inference", got.EventType, "maas profile should map to inference event type")
 	assert.Equal(t, "granite-3.3-8b", got.Model)
 	assert.True(t, decimal.NewFromInt(350).Equal(got.PromptTokens))
 	assert.True(t, decimal.NewFromInt(175).Equal(got.CompletionTokens))
