@@ -77,3 +77,49 @@ func (c *HTTPAdjustmentClient) PostEvictionCredit(ctx context.Context, tenant, a
 	}
 	return nil
 }
+
+func (c *HTTPAdjustmentClient) PostSLACredit(ctx context.Context, tenant, amount, workloadUID string, latencySecs float64) error {
+	body := struct {
+		Tenant         string `json:"tenant"`
+		Amount         string `json:"amount"`
+		Kind           string `json:"kind"`
+		Reason         string `json:"reason"`
+		IdempotencyKey string `json:"idempotency_key"`
+	}{
+		Tenant:         tenant,
+		Amount:         amount,
+		Kind:           "sla_credit",
+		Reason:         fmt.Sprintf("SLO breach for workload %s: %.0fs admission latency", workloadUID, latencySecs),
+		IdempotencyKey: fmt.Sprintf("slo-%s", workloadUID),
+	}
+
+	data, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshal adjustment: %w", err)
+	}
+
+	httpClient := c.HTTPClient
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/adjustments", bytes.NewReader(data))
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("POST /v1/adjustments: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode == http.StatusConflict {
+		return nil
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("POST /v1/adjustments: unexpected status %d", resp.StatusCode)
+	}
+	return nil
+}

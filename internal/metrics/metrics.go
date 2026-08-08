@@ -7,7 +7,10 @@ import (
 	crmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
-const labelTenantID = "tenant_id"
+const (
+	labelTenantID = "tenant_id"
+	labelSKU      = "sku"
+)
 
 var (
 	ChargeAmountTotal = prometheus.NewCounterVec(
@@ -15,7 +18,7 @@ var (
 			Name: "billing_charge_amount_total",
 			Help: "Cumulative charge amount in billing currency, by tenant and SKU.",
 		},
-		[]string{labelTenantID, "sku", "currency"},
+		[]string{labelTenantID, labelSKU, "currency"},
 	)
 
 	EventsRatedTotal = prometheus.NewCounter(
@@ -119,7 +122,24 @@ var (
 			Name: "billing_reservation_charge_amount_total",
 			Help: "Cumulative reservation charge amount by tenant, SKU, and currency.",
 		},
-		[]string{labelTenantID, "sku", "currency"},
+		[]string{labelTenantID, labelSKU, "currency"},
+	)
+
+	SLOBreachTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "billing_gpu_slo_breach_total",
+			Help: "Total SLO breaches for Guaranteed GPU workload admission latency.",
+		},
+		[]string{labelTenantID, labelSKU},
+	)
+
+	AdmissionLatencySeconds = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "billing_gpu_admission_latency_seconds",
+			Help:    "Admission latency for Guaranteed GPU workloads.",
+			Buckets: []float64{1, 5, 30, 60, 120, 300, 600, 1800},
+		},
+		[]string{labelTenantID, labelSKU},
 	)
 )
 
@@ -151,5 +171,7 @@ func init() {
 		InvoiceErrors,
 		ReservationChargesTotal,
 		ReservationChargeAmountTotal,
+		SLOBreachTotal,
+		AdmissionLatencySeconds,
 	)
 }

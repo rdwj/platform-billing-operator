@@ -35,6 +35,7 @@ const (
 	ConditionKueueSynced       = "KueueSynced"
 
 	DefaultMinAllocationSeconds int32 = 14400 // 4 hours
+	DefaultSloAdmissionSeconds  int32 = 300   // 5 minutes
 )
 
 // ReservationWindow defines the time window for a GPU reservation.
@@ -102,6 +103,13 @@ type ReservationSpec struct {
 	// +optional
 	// +kubebuilder:validation:Pattern=`^\d+(\.\d{1,6})?$`
 	EvictionCreditPerGpuSecond *string `json:"evictionCreditPerGpuSecond,omitempty"`
+
+	// SloAdmissionSeconds is the maximum acceptable queue time (in seconds) for a
+	// Guaranteed workload before an SLA credit is issued. Only applicable to
+	// Guaranteed class. Defaults to 300 (5 minutes) if not set.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	SloAdmissionSeconds *int32 `json:"sloAdmissionSeconds,omitempty"`
 
 	// MonthlyPrice is the fixed monthly price for this reservation as a decimal string.
 	// +kubebuilder:validation:Required

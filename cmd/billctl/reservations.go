@@ -26,6 +26,7 @@ type reservationResponse struct {
 	Class                      string                `json:"class"`
 	MinAllocationSeconds       *int32                `json:"minAllocationSeconds,omitempty"`
 	EvictionCreditPerGpuSecond *string               `json:"evictionCreditPerGpuSecond,omitempty"`
+	SloAdmissionSeconds        *int32                `json:"sloAdmissionSeconds,omitempty"`
 	Window                     reservationWindowResp `json:"window"`
 	MonthlyPrice               string                `json:"monthlyPrice"`
 	State                      string                `json:"state"`
@@ -51,6 +52,7 @@ type createReservationRequest struct {
 	Class                      string  `json:"class"`
 	MinAllocationSeconds       *int32  `json:"minAllocationSeconds,omitempty"`
 	EvictionCreditPerGpuSecond *string `json:"evictionCreditPerGpuSecond,omitempty"`
+	SloAdmissionSeconds        *int32  `json:"sloAdmissionSeconds,omitempty"`
 	Start                      string  `json:"start"`
 	End                        string  `json:"end"`
 	MonthlyPrice               string  `json:"monthlyPrice"`
@@ -158,6 +160,9 @@ func reservationsGetCmd() *cobra.Command {
 			if r.EvictionCreditPerGpuSecond != nil {
 				fmt.Printf("EvictCredit:   %s/gpu-sec\n", *r.EvictionCreditPerGpuSecond)
 			}
+			if r.SloAdmissionSeconds != nil {
+				fmt.Printf("SLO:           %ds\n", *r.SloAdmissionSeconds)
+			}
 			fmt.Printf("MonthlyPrice:  %s\n", r.MonthlyPrice)
 			fmt.Printf("State:         %s\n", r.State)
 			fmt.Printf("Window:        %s - %s\n", r.Window.Start, r.Window.End)
@@ -180,7 +185,7 @@ func reservationsGetCmd() *cobra.Command {
 
 func reservationsCreateCmd() *cobra.Command {
 	var tenant, sku, geo, class, start, end, monthlyPrice, evictionCredit string
-	var count, minAllocSeconds int32
+	var count, minAllocSeconds, sloAdmissionSeconds int32
 
 	cmd := &cobra.Command{
 		Use:   "create",
@@ -201,6 +206,9 @@ func reservationsCreateCmd() *cobra.Command {
 			}
 			if cmd.Flags().Changed("eviction-credit-per-gpu-second") {
 				req.EvictionCreditPerGpuSecond = &evictionCredit
+			}
+			if cmd.Flags().Changed("slo-admission-seconds") {
+				req.SloAdmissionSeconds = &sloAdmissionSeconds
 			}
 			reqBody, err := json.Marshal(req)
 			if err != nil {
@@ -238,6 +246,8 @@ func reservationsCreateCmd() *cobra.Command {
 		"minimum allocation time in seconds (Preemptible only)")
 	cmd.Flags().StringVar(&evictionCredit, "eviction-credit-per-gpu-second", "",
 		"credit rate per GPU-second on eviction (Preemptible only, decimal)")
+	cmd.Flags().Int32Var(&sloAdmissionSeconds, "slo-admission-seconds", 0,
+		"max admission queue time in seconds (Guaranteed only, default 300)")
 	cmd.Flags().StringVar(&start, "start", "", "start time RFC3339 (required)")
 	cmd.Flags().StringVar(&end, "end", "", "end time RFC3339 (required)")
 	cmd.Flags().StringVar(&monthlyPrice, "monthly-price", "", "decimal price per month (required)")

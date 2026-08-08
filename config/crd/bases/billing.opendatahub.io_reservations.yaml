@@ -99,6 +99,14 @@ spec:
                 description: SKU is the GPU product identifier (e.g. "h200", "h200-mig-3g.40gb").
                 minLength: 1
                 type: string
+              sloAdmissionSeconds:
+                description: |-
+                  SloAdmissionSeconds is the maximum acceptable queue time (in seconds) for a
+                  Guaranteed workload before an SLA credit is issued. Only applicable to
+                  Guaranteed class. Defaults to 300 (5 minutes) if not set.
+                format: int32
+                minimum: 0
+                type: integer
               tenantRef:
                 description: TenantRef is the name of the TenantAccount this reservation
                   belongs to.

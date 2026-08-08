@@ -251,9 +251,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	var adjustmentPoster controller.AdjustmentPoster
+	if ledgerHTTPURL := os.Getenv("LEDGER_HTTP_URL"); ledgerHTTPURL != "" {
+		adjustmentPoster = &controller.HTTPAdjustmentClient{BaseURL: ledgerHTTPURL}
+	} else if collectorURL := os.Getenv("KUEUE_COLLECTOR_LEDGER_URL"); collectorURL != "" {
+		adjustmentPoster = &controller.HTTPAdjustmentClient{BaseURL: collectorURL}
+	}
+
 	if err = (&controller.ReservationReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:           mgr.GetClient(),
+		Scheme:           mgr.GetScheme(),
+		AdjustmentPoster: adjustmentPoster,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Reservation")
 		os.Exit(1)
@@ -494,6 +502,22 @@ func main() {
 			os.Exit(1)
 		}
 		setupLog.Info("GPU collector started", "ledger_url", collectorURL)
+	}
+
+	// --- GPU SLO controller (admission latency check for Guaranteed reservations) ---
+	if adjustmentPoster != nil {
+		sloResolver := rater.NewK8sResolver(mgr.GetClient())
+		sloCtrl := &controller.SLOController{
+			Client:           mgr.GetClient(),
+			Log:              ctrl.Log.WithName("gpu-slo"),
+			AdjustmentPoster: adjustmentPoster,
+			Resolver:         sloResolver,
+		}
+		if err := sloCtrl.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create SLO controller")
+			os.Exit(1)
+		}
+		setupLog.Info("GPU SLO controller started")
 	}
 
 	// +kubebuilder:scaffold:builder

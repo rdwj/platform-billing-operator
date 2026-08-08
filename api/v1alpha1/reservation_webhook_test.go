@@ -191,3 +191,68 @@ func TestValidateReservationSpec_EvictionCreditPerGpuSecond(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateReservationSpec_SloAdmissionSeconds(t *testing.T) {
+	tests := []struct {
+		name      string
+		class     string
+		slo       *int32
+		wantError bool
+		errField  string
+	}{
+		{
+			name:      "Guaranteed with valid SLO",
+			class:     ReservationClassGuaranteed,
+			slo:       int32Ptr(300),
+			wantError: false,
+		},
+		{
+			name:      "Guaranteed without SLO (nil, uses default)",
+			class:     ReservationClassGuaranteed,
+			slo:       nil,
+			wantError: false,
+		},
+		{
+			name:      "Preemptible with SLO rejected",
+			class:     ReservationClassPreemptible,
+			slo:       int32Ptr(300),
+			wantError: true,
+			errField:  "spec.sloAdmissionSeconds",
+		},
+		{
+			name:      "Negative SLO rejected",
+			class:     ReservationClassGuaranteed,
+			slo:       int32Ptr(-1),
+			wantError: true,
+			errField:  "spec.sloAdmissionSeconds",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := validReservation(tt.class)
+			r.Spec.SloAdmissionSeconds = tt.slo
+
+			errs := validateReservationSpec(r)
+
+			if tt.wantError && len(errs) == 0 {
+				t.Errorf("expected validation error for %s, got none", tt.errField)
+			}
+			if !tt.wantError && len(errs) > 0 {
+				t.Errorf("expected no errors, got: %v", errs)
+			}
+			if tt.wantError && len(errs) > 0 {
+				found := false
+				for _, e := range errs {
+					if e.Field == tt.errField {
+						found = true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("expected error on field %q, got errors: %v", tt.errField, errs)
+				}
+			}
+		})
+	}
+}

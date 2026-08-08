@@ -154,6 +154,21 @@ func validateReservationSpec(r *Reservation) field.ErrorList {
 		}
 	}
 
+	if r.Spec.SloAdmissionSeconds != nil {
+		if *r.Spec.SloAdmissionSeconds < 0 {
+			errs = append(errs, field.Invalid(
+				specPath.Child("sloAdmissionSeconds"), *r.Spec.SloAdmissionSeconds,
+				"must be non-negative",
+			))
+		}
+		if r.Spec.Class == ReservationClassPreemptible {
+			errs = append(errs, field.Invalid(
+				specPath.Child("sloAdmissionSeconds"), *r.Spec.SloAdmissionSeconds,
+				"only applicable to Guaranteed reservations",
+			))
+		}
+	}
+
 	if !decimalPattern.MatchString(r.Spec.MonthlyPrice) {
 		errs = append(errs, field.Invalid(
 			specPath.Child("monthlyPrice"), r.Spec.MonthlyPrice,

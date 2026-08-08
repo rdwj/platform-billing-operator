@@ -36,6 +36,7 @@ import (
 // AdjustmentPoster posts billing adjustments to the ledger HTTP API.
 type AdjustmentPoster interface {
 	PostEvictionCredit(ctx context.Context, tenant, amount, workloadUID string, runtimeSecs float64) error
+	PostSLACredit(ctx context.Context, tenant, amount, workloadUID string, latencySecs float64) error
 }
 
 // ReservationReconciler manages the Reservation state machine:

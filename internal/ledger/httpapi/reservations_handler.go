@@ -27,6 +27,7 @@ type reservationResponse struct {
 	Class                      string                    `json:"class"`
 	MinAllocationSeconds       *int32                    `json:"minAllocationSeconds,omitempty"`
 	EvictionCreditPerGpuSecond *string                   `json:"evictionCreditPerGpuSecond,omitempty"`
+	SloAdmissionSeconds        *int32                    `json:"sloAdmissionSeconds,omitempty"`
 	Window                     reservationWindowResponse `json:"window"`
 	MonthlyPrice               string                    `json:"monthlyPrice"`
 	State                      string                    `json:"state"`
@@ -52,6 +53,7 @@ type createReservationRequest struct {
 	Class                      string  `json:"class"`
 	MinAllocationSeconds       *int32  `json:"minAllocationSeconds,omitempty"`
 	EvictionCreditPerGpuSecond *string `json:"evictionCreditPerGpuSecond,omitempty"`
+	SloAdmissionSeconds        *int32  `json:"sloAdmissionSeconds,omitempty"`
 	Start                      string  `json:"start"`
 	End                        string  `json:"end"`
 	MonthlyPrice               string  `json:"monthlyPrice"`
@@ -182,6 +184,7 @@ func (h *reservationsHandler) handleCreate(w http.ResponseWriter, r *http.Reques
 			Class:                      req.Class,
 			MinAllocationSeconds:       req.MinAllocationSeconds,
 			EvictionCreditPerGpuSecond: req.EvictionCreditPerGpuSecond,
+			SloAdmissionSeconds:        req.SloAdmissionSeconds,
 			MonthlyPrice:               req.MonthlyPrice,
 			Window: billingv1alpha1.ReservationWindow{
 				Start: metav1.NewTime(startTime),
@@ -243,6 +246,7 @@ func toReservationResponse(res *billingv1alpha1.Reservation) reservationResponse
 		Class:                      res.Spec.Class,
 		MinAllocationSeconds:       res.Spec.MinAllocationSeconds,
 		EvictionCreditPerGpuSecond: res.Spec.EvictionCreditPerGpuSecond,
+		SloAdmissionSeconds:        res.Spec.SloAdmissionSeconds,
 		MonthlyPrice:               res.Spec.MonthlyPrice,
 		State:                      res.Status.State,
 		Window: reservationWindowResponse{
