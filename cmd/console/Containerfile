@@ -13,11 +13,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY --from=spa-builder /app/dist/ console/dist/
 COPY cmd/ cmd/
-COPY console/embed.go console/embed.go
+COPY console/embed_prod.go console/embed_prod.go
+COPY console/embed_dev.go console/embed_dev.go
 COPY api/ api/
 COPY gen/ gen/
 COPY internal/ internal/
-RUN CGO_ENABLED=0 go build -o console ./cmd/console/
+RUN CGO_ENABLED=0 go build -tags=console_embed -o console ./cmd/console/
 
 # Stage 3: Runtime
 FROM registry.redhat.io/ubi9/ubi-micro:latest
