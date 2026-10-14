@@ -27,7 +27,7 @@ Design repo docs, in precedence order (project-plan/ wins on conflict; see its C
 - M1 (capture + ledger): `project-plan/architecture.md` §3 (WASM strategy, ADR-0006), `operator-plan/ledger-schema.md`, `contracts/`, `fake-openai/`.
 - M2 (rating + wallet): `operator-plan/controllers.md` §5, `contracts/rating-vectors.v1.json`, `api/openapi.yaml`.
 - M3+: `operator-plan/controllers.md` §2/§6–8, `operator-plan/interfaces.md`, `operator-plan/security-threat-model.md`, `operator-plan/runbook.md`.
-- Decisions: `operator-plan/adr/README.md` (6 ADRs) and `design_files/open-questions.md`. Never silently resolve an open ADR in code — update the ADR first.
+- Decisions: `operator-plan/adr/README.md` (ADR-0001-0006, 0008), `docs/adr/0007-psp-usagesink-split.md` in this repo, and `design_files/open-questions.md`. Never silently resolve an open ADR in code — update the ADR first.
 
 ## Definition of done (every milestone)
 
