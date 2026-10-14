@@ -43,7 +43,7 @@ Run `make help` for available targets. Run `make test && make lint && make money
 
 ## License
 
-Copyright 2026.
+Copyright 2026 Red Hat, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
