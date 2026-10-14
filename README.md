@@ -41,6 +41,8 @@ operator-sdk run bundle quay.io/wjackson/platform-billing-operator-bundle:v0.0.1
 
 Run `make help` for available targets. Run `make test && make lint && make money-safety` before committing.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development environment, the rules CI enforces, and what a reviewable change looks like.
+
 ## License
 
 Copyright 2026 Red Hat, Inc.
